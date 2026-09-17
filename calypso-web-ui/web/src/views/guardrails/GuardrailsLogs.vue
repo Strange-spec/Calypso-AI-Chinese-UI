@@ -34,7 +34,7 @@
         </div>
 
         <div class="filter-actions">
-          <el-button icon="Refresh" @click="fetchLogs" :loading="loading">
+          <el-button :icon="Refresh" @click="fetchLogs" :loading="loading">
             刷新流水
           </el-button>
         </div>
@@ -181,10 +181,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { Refresh } from '@element-plus/icons-vue'
 import { getGuardrailsLogs } from '../../api/guardrails'
 import { getProjects } from '../../api/projects'
-
 import { useConfigStore } from '../../stores/config'
 
 const props = defineProps({
