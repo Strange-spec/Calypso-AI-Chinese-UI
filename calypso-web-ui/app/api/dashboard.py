@@ -1,9 +1,9 @@
 """Calypso 安全运营大盘度量 API 路由。"""
 
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.config import settings
+from app.config import settings, get_effective_token
 from app.services.mock_data import mock_engine
 from app.services.calypso_client import CalypsoClient, CalypsoClientError
 from app.services.metrics_aggregator import MetricsAggregator
@@ -13,6 +13,7 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 @router.get("/metrics")
 async def get_dashboard_metrics(
+    request: Request,
     timeframe: str = Query("24h", description="统计时间范围，可选 24h, 7d, 30d"),
     project_id: Optional[str] = Query(None, description="按项目筛选度量指标"),
 ) -> Dict[str, Any]:
@@ -20,7 +21,7 @@ async def get_dashboard_metrics(
     if settings.app_mode == "demo":
         return mock_engine.get_metrics(timeframe=timeframe)
 
-    client = CalypsoClient(base_url=settings.calypso_base_url, token=settings.calypso_api_token)
+    client = CalypsoClient(base_url=settings.calypso_base_url, token=get_effective_token(request))
     try:
         resolved_project = project_id or settings.default_project_id
         res = await client.get_prompts(project_id=resolved_project, limit=100)

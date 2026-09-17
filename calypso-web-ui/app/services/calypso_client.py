@@ -148,7 +148,7 @@ class CalypsoClient:
 
     async def scan_prompt(self, prompt: str, project_id: Optional[str] = None) -> Dict[str, Any]:
         """调用 Calypso 扫描接口对输入提示词进行实时安全评估与过滤。"""
-        payload: Dict[str, Any] = {"prompt": prompt}
+        payload: Dict[str, Any] = {"input": prompt, "prompt": prompt}
         if project_id:
             payload["project_id"] = project_id
             endpoint = f"/backend/v1/projects/{project_id}/scans"
@@ -157,9 +157,9 @@ class CalypsoClient:
         try:
             return await self._request("POST", endpoint, json=payload)
         except CalypsoAPIError as exc:
-            if exc.status_code == 404 and project_id:
-                # 兼容部分 Calypso 部署版本中全局扫描路径 /backend/v1/scans
-                return await self._request("POST", "/backend/v1/scans", json={"prompt": prompt, "project_id": project_id})
+            if exc.status_code == 404:
+                # 兼容全局扫描路径 /backend/v1/scans
+                return await self._request("POST", "/backend/v1/scans", json=payload)
             raise exc
 
     async def get_prompts(

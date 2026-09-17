@@ -1,10 +1,10 @@
 """Calypso 系统状态与配置管理 API 路由。"""
 
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.config import settings
+from app.config import settings, get_effective_token
 from app.services.calypso_client import CalypsoClient, CalypsoClientError
 
 router = APIRouter(prefix="/system", tags=["System"])
@@ -26,21 +26,22 @@ class ConnectionTestRequest(BaseModel):
 
 
 @router.get("/status")
-async def get_system_status() -> Dict[str, Any]:
+async def get_system_status(request: Request) -> Dict[str, Any]:
     """获取当前系统状态、运行模式与配置概要。"""
+    current_token = get_effective_token(request)
     return {
         "status": "ok",
         "app_name": settings.app_name,
         "version": settings.version,
         "mode": settings.app_mode,
         "base_url": settings.calypso_base_url,
-        "has_token": bool(settings.calypso_api_token),
+        "has_token": bool(current_token),
         "project_id": settings.default_project_id,
     }
 
 
 @router.post("/config")
-async def update_system_config(req: ConfigUpdateRequest) -> Dict[str, Any]:
+async def update_system_config(req: ConfigUpdateRequest, request: Request) -> Dict[str, Any]:
     """更新内存中的系统配置，并可选触发连通性测试。"""
     if req.base_url is not None:
         settings.calypso_base_url = req.base_url.strip()
@@ -65,7 +66,8 @@ async def update_system_config(req: ConfigUpdateRequest) -> Dict[str, Any]:
             }
         else:
             try:
-                client = CalypsoClient(base_url=settings.calypso_base_url, token=settings.calypso_api_token)
+                active_token = settings.calypso_api_token or get_effective_token(request)
+                client = CalypsoClient(base_url=settings.calypso_base_url, token=active_token)
                 test_data = await client.test_connection()
                 await client.close()
                 conn_result = {
@@ -95,10 +97,10 @@ async def update_system_config(req: ConfigUpdateRequest) -> Dict[str, Any]:
 
 
 @router.post("/test-connection")
-async def test_connection(req: Optional[ConnectionTestRequest] = None) -> Dict[str, Any]:
+async def test_connection(request: Request, req: Optional[ConnectionTestRequest] = None) -> Dict[str, Any]:
     """测试指定或当前配置的 Calypso API 连通性。"""
     target_url = (req.base_url if req and req.base_url else settings.calypso_base_url) or ""
-    target_token = (req.token if req and req.token is not None else settings.calypso_api_token)
+    target_token = req.token if (req and req.token is not None) else get_effective_token(request)
 
     # 若系统处于 demo 模式且未传入外部特定 URL，直接返回模拟成功
     if settings.app_mode == "demo" and (not req or not req.base_url):

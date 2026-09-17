@@ -2,9 +2,9 @@
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.config import settings
+from app.config import settings, get_effective_token
 from app.services.mock_data import mock_engine
 from app.services.calypso_client import CalypsoClient, CalypsoClientError
 
@@ -51,6 +51,7 @@ def _generate_demo_audit_logs() -> List[Dict[str, Any]]:
 
 @router.get("/logs")
 async def get_audit_logs(
+    request: Request,
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     outcome: Optional[str] = Query(None, description="按判定结果筛选: blocked, cleared, redacted, flagged"),
@@ -81,7 +82,7 @@ async def get_audit_logs(
         }
 
     # 在线模式调用 Calypso 原生 Prompts 接口
-    client = CalypsoClient(base_url=settings.calypso_base_url, token=settings.calypso_api_token)
+    client = CalypsoClient(base_url=settings.calypso_base_url, token=get_effective_token(request))
     try:
         outcomes_list = [outcome] if outcome else None
         res = await client.get_prompts(

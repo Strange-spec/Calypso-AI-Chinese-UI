@@ -2,10 +2,10 @@
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.config import settings
+from app.config import settings, get_effective_token
 from app.services.mock_data import mock_engine
 from app.services.calypso_client import CalypsoClient, CalypsoClientError
 
@@ -26,7 +26,7 @@ async def get_guardrail_presets() -> List[Dict[str, Any]]:
 
 
 @router.post("/scan")
-async def scan_prompt(req: ScanRequest) -> Dict[str, Any]:
+async def scan_prompt(req: ScanRequest, request: Request) -> Dict[str, Any]:
     """对输入提示词进行实时安全评估与过滤。
 
     支持注入、越狱、凭证泄露、编码混淆及 PII 数据脱敏拦截。
@@ -41,7 +41,8 @@ async def scan_prompt(req: ScanRequest) -> Dict[str, Any]:
         return mock_engine.scan_prompt(prompt=req.prompt, project_id=project_id)
 
     # Online 在线模式
-    client = CalypsoClient(base_url=settings.calypso_base_url, token=settings.calypso_api_token)
+    effective_token = get_effective_token(request)
+    client = CalypsoClient(base_url=settings.calypso_base_url, token=effective_token)
     try:
         resolved_project = req.project_id or settings.default_project_id
         if not resolved_project:
@@ -57,19 +58,30 @@ async def scan_prompt(req: ScanRequest) -> Dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
 
         # 规范化 Calypso API 返回结构
+        res_data = raw_res.get("result") if isinstance(raw_res.get("result"), dict) else {}
         outcome = (
             raw_res.get("outcome")
-            or (raw_res.get("result", {}).get("outcome") if isinstance(raw_res.get("result"), dict) else None)
-            or (raw_res.get("result", {}).get("status") if isinstance(raw_res.get("result"), dict) else None)
+            or res_data.get("outcome")
+            or res_data.get("status")
             or raw_res.get("status")
             or "cleared"
         )
-        redacted = raw_res.get("redacted_prompt") or req.prompt
+        redacted = raw_res.get("redactedInput") or raw_res.get("redacted_prompt") or req.prompt
         triggered = []
         if "triggered_scanners" in raw_res:
             triggered = raw_res["triggered_scanners"]
-        elif isinstance(raw_res.get("result"), dict) and "scannerResults" in raw_res["result"]:
-            triggered = raw_res["result"]["scannerResults"]
+        elif "scannerResults" in res_data:
+            for s in res_data["scannerResults"]:
+                s_outcome = s.get("outcome") or s.get("status")
+                meta = s.get("scannerVersionMeta") or {}
+                if s_outcome in ("blocked", "failed", "redacted", "flagged"):
+                    triggered.append({
+                        "id": s.get("scannerId") or s.get("id"),
+                        "title": meta.get("name") or s.get("name", "安全规则"),
+                        "action": s_outcome,
+                        "confidence": 0.95,
+                        "reason": meta.get("description") or f"触发安全扫描器: {s_outcome}",
+                    })
 
         llm_resp = raw_res.get("llm_response")
         if not llm_resp and outcome == "cleared":
@@ -79,7 +91,7 @@ async def scan_prompt(req: ScanRequest) -> Dict[str, Any]:
             "outcome": outcome,
             "prompt": req.prompt,
             "redacted_prompt": redacted,
-            "project_id": project_id,
+            "project_id": resolved_project,
             "timestamp": now,
             "triggered_scanners": triggered,
             "llm_response": llm_resp,
