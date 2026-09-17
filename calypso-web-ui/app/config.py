@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     app_name: str = "Calypso AI 中文安全运营控制台"
     version: str = "1.0.0"
     calypso_base_url: str = "https://us1.calypsoai.app"
-    calypso_api_token: Optional[str] = "MDFhMGFmYjQtNGFiYS03MDc4LTk3Y2MtMzVhMmZhNjQzZjQ3/hXLIByTz8rsvxaI4fz2v47kQBOffVrqVRyovLSuk8ZrBedKu3QEKPhDlaU29VInDJxdiGllKYlJPr24HNgB4w"
+    calypso_api_token: Optional[str] = None
     default_project_id: Optional[str] = None
     app_mode: str = "online"  # "demo" 或 "online"
     port: int = 8080
