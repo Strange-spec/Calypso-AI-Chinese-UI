@@ -134,6 +134,89 @@ class CalypsoClient:
                 return res["data"]
         return [res] if res else []
 
+    async def get_project(self, project_id: str) -> Dict[str, Any]:
+        """获取指定项目详细信息与关联配置。"""
+        return await self._request("GET", f"/backend/v1/projects/{project_id}")
+
+    async def create_project(
+        self,
+        name: str,
+        description: str = "",
+        project_type: str = "app",
+        scanners: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """在 Calypso 原生集群中创建新项目并绑定规则。"""
+        payload: Dict[str, Any] = {
+            "name": name,
+            "type": project_type,
+            "description": description,
+            "config": {
+                "scanners": scanners or [],
+                "providers": [],
+            },
+        }
+        return await self._request("POST", "/backend/v1/projects", json=payload)
+
+    async def update_project(
+        self,
+        project_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        project_type: Optional[str] = None,
+        scanners: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """更新指定项目的规则配置或基本信息。"""
+        try:
+            existing = await self.get_project(project_id)
+        except Exception:
+            existing = {}
+        config = existing.get("config", {}) if isinstance(existing, dict) else {}
+        if scanners is not None:
+            config["scanners"] = scanners
+
+        payload: Dict[str, Any] = {
+            "name": name or (existing.get("name") if isinstance(existing, dict) else "Project"),
+            "config": config,
+        }
+        if description is not None:
+            payload["description"] = description
+        if project_type is not None:
+            payload["type"] = project_type
+
+        return await self._request("PUT", f"/backend/v1/projects/{project_id}", json=payload)
+
+    async def delete_project(self, project_id: str) -> Dict[str, Any]:
+        """删除指定项目。"""
+        return await self._request("DELETE", f"/backend/v1/projects/{project_id}")
+
+    async def list_all_scanners(self) -> List[Dict[str, Any]]:
+        """获取系统级所有可用扫描器规则库（内置及自定义）。"""
+        res = await self._request("GET", "/backend/v1/scanners")
+        if isinstance(res, dict) and "scanners" in res:
+            return res["scanners"]
+        if isinstance(res, list):
+            return res
+        return []
+
+    async def create_scanner(
+        self,
+        name: str,
+        direction: str = "both",
+        input_data: str = "",
+        scanner_type: str = "custom",
+    ) -> Dict[str, Any]:
+        """在 Calypso 原生集群中新建自定义安全扫描规则。"""
+        payload = {
+            "name": name,
+            "direction": direction,
+            "config": {
+                "type": scanner_type,
+                "input": input_data,
+                "scanContext": "directional",
+            },
+        }
+        return await self._request("POST", "/backend/v1/scanners", json=payload)
+
     async def list_scanners(self, project_id: str) -> List[Dict[str, Any]]:
         """获取指定项目关联的安全扫描器配置列表。"""
         res = await self._request("GET", f"/backend/v1/projects/{project_id}/scanners")
@@ -147,20 +230,25 @@ class CalypsoClient:
         return [res] if res else []
 
     async def scan_prompt(self, prompt: str, project_id: Optional[str] = None) -> Dict[str, Any]:
-        """调用 Calypso 扫描接口对输入提示词进行实时安全评估与过滤。"""
-        payload: Dict[str, Any] = {"input": prompt, "prompt": prompt}
+        """调用 Calypso 原生提示词护栏与网关路由接口对输入进行安全评估与 LLM 交互。"""
+        # Calypso SaaS 原生护栏与模型路由入口为 /backend/v1/prompts
+        # 入参为 {"input": prompt, "project": project_id}
+        payload: Dict[str, Any] = {"input": prompt}
         if project_id:
-            payload["project_id"] = project_id
-            endpoint = f"/backend/v1/projects/{project_id}/scans"
-        else:
-            endpoint = "/backend/v1/scans"
+            payload["project"] = project_id
+            payload["projectId"] = project_id
+
         try:
-            return await self._request("POST", endpoint, json=payload)
+            return await self._request("POST", "/backend/v1/prompts", json=payload)
         except CalypsoAPIError as exc:
-            if exc.status_code == 404:
-                # 兼容全局扫描路径 /backend/v1/scans
-                return await self._request("POST", "/backend/v1/scans", json=payload)
+            if exc.status_code in (404, 405):
+                # 兼容旧版本扫描接口
+                return await self._request("POST", "/backend/v1/scans", json={"input": prompt})
             raise exc
+
+    async def query_metrics(self, requests: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """调用 Calypso 原生指标与度量聚合接口 POST /backend/v1/metrics。"""
+        return await self._request("POST", "/backend/v1/metrics", json={"requests": requests})
 
     async def get_prompts(
         self,
@@ -175,6 +263,7 @@ class CalypsoClient:
         safe_limit = min(max(1, limit), 100) if limit else 100
         params: Dict[str, Any] = {"limit": safe_limit}
         if project_id:
+            params["projectId"] = project_id
             params["project_id"] = project_id
         if outcomes:
             params["outcomes"] = ",".join(outcomes) if isinstance(outcomes, (list, tuple)) else str(outcomes)
@@ -184,13 +273,25 @@ class CalypsoClient:
             params["before"] = before
         return await self._request("GET", "/backend/v1/prompts", params=params)
 
+    async def get_audit_events(self, limit: int = 50) -> Dict[str, Any]:
+        """获取系统操作安全合规与审计事件。"""
+        safe_limit = min(max(1, limit), 100) if limit else 50
+        return await self._request("GET", "/backend/v1/audit", params={"limit": safe_limit})
+
     async def list_campaigns(self) -> Dict[str, Any]:
         """获取红队测试活动（Campaigns）列表。"""
         return await self._request("GET", "/backend/v1/campaigns")
 
-    async def list_campaign_runs(self) -> Dict[str, Any]:
+    async def list_campaign_runs(self, campaign_id: Optional[str] = None) -> Dict[str, Any]:
         """获取红队测试任务执行记录（Campaign Runs）列表。"""
-        return await self._request("GET", "/backend/v1/campaign-runs")
+        params = {}
+        if campaign_id:
+            params["campaign_id"] = campaign_id
+        return await self._request("GET", "/backend/v1/campaign-runs", params=params if params else None)
+
+    async def get_campaign_run(self, run_id: str) -> Dict[str, Any]:
+        """获取单个红队测试执行详情及 Raw Data。"""
+        return await self._request("GET", f"/backend/v1/campaign-runs/{run_id}")
 
     async def close(self) -> None:
         """关闭底层 HTTP 连接池。"""

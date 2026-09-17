@@ -23,12 +23,14 @@ app.add_middleware(
 
 from app.api.system import router as system_router
 from app.api.guardrails import router as guardrails_router
+from app.api.projects import router as projects_router
 from app.api.dashboard import router as dashboard_router
 from app.api.redteam import router as redteam_router
 from app.api.audit import router as audit_router
 
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(guardrails_router, prefix="/api/v1")
+app.include_router(projects_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(redteam_router, prefix="/api/v1")
 app.include_router(audit_router, prefix="/api/v1")

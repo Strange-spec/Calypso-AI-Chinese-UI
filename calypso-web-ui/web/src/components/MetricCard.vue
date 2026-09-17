@@ -9,7 +9,7 @@
       </div>
       <div v-if="icon || $slots.icon" class="metric-card__icon-box" :style="iconBoxStyle">
         <slot name="icon">
-          <component :is="icon" v-if="isComponent(icon)" />
+          <component :is="getIconComponent(icon)" v-if="getIconComponent(icon)" />
           <span v-else class="metric-card__icon-char">{{ icon }}</span>
         </slot>
       </div>
@@ -97,8 +97,13 @@ const props = defineProps({
   }
 })
 
-function isComponent(item) {
-  return typeof item === 'object' || typeof item === 'function'
+import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+
+function getIconComponent(item) {
+  if (!item) return null
+  if (typeof item === 'object' || typeof item === 'function') return item
+  if (typeof item === 'string' && ElementPlusIconsVue[item]) return ElementPlusIconsVue[item]
+  return null
 }
 
 // 格式化千分位数值

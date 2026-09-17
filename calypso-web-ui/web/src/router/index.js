@@ -12,10 +12,14 @@ const routes = [
     meta: { title: '态势大屏' }
   },
   {
+    path: '/guardrails',
+    name: 'GuardrailsCenter',
+    component: () => import('../views/GuardrailsCenter.vue'),
+    meta: { title: '安全护栏运营中心' }
+  },
+  {
     path: '/playground',
-    name: 'Playground',
-    component: () => import('../views/Playground.vue'),
-    meta: { title: '实时护栏测试台' }
+    redirect: '/guardrails?tab=playground'
   },
   {
     path: '/redteam',

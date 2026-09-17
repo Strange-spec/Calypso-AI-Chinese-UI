@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import apiClient from '../api/client'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 export const useConfigStore = defineStore('config', () => {
   // 状态变量
@@ -123,11 +123,29 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
-  // 切换运行模式（演示 / 在线）
+  // 切换运行模式（演示 / 在线）- 从 Online 切换到 Demo 必须二次确认
   async function toggleMode() {
     const nextMode = mode.value === 'demo' ? 'online' : 'demo'
+    if (mode.value === 'online' && nextMode === 'demo') {
+      try {
+        await ElMessageBox.confirm(
+          '当前处于生产/私有集群在线模式 (Online)。切换为内置演示模式 (Demo) 将仅展示静态模拟数据，断开与 Calypso AI 实时集群的同步。确定要切换为演示模式吗？',
+          '切换运行模式二次确认',
+          {
+            confirmButtonText: '确认切换为演示模式',
+            cancelButtonText: '取消',
+            type: 'warning',
+            confirmButtonClass: 'el-button--danger'
+          }
+        )
+      } catch {
+        return false
+      }
+    }
     await updateConfig({ mode: nextMode, test_connection: nextMode === 'online' })
+    return true
   }
+
 
   return {
     baseUrl,

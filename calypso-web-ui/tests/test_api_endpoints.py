@@ -157,6 +157,45 @@ def test_redteam_campaigns():
     assert any("BMW" in name for name in camp_names)
 
 
+def test_redteam_reports_list_and_raw():
+    """测试红队报告清单、状态过滤与 Raw Data。"""
+    # 1. 默认查询所有报告
+    response = client.get("/api/v1/redteam/reports")
+    assert response.status_code == 200
+    data = response.json()
+    assert "reports" in data
+    assert "summary" in data
+    assert data["total"] >= 4
+    
+    first_report = data["reports"][0]
+    assert "status" in first_report
+    assert "casi_score" in first_report
+    assert "progress" in first_report
+    assert "total" in first_report
+
+    # 2. 状态过滤 (status=complete)
+    res_filtered = client.get("/api/v1/redteam/reports?status=complete")
+    assert res_filtered.status_code == 200
+    data_filtered = res_filtered.json()
+    for r in data_filtered["reports"]:
+        assert r["status"] == "complete"
+
+    # 3. 报告 Raw Data 获取
+    run_id = first_report["id"]
+    res_raw = client.get(f"/api/v1/redteam/reports/{run_id}/raw")
+    assert res_raw.status_code == 200
+    raw_data = res_raw.json()
+    assert "raw" in raw_data or "campaignRun" in raw_data
+
+    # 4. 报告深度分析
+    res_analysis = client.get(f"/api/v1/redteam/reports/{run_id}/analysis")
+    assert res_analysis.status_code == 200
+    analysis_data = res_analysis.json()
+    assert "data" in analysis_data
+    assert "attack_technique_breakdown" in analysis_data["data"]
+
+
+
 def test_redteam_reports_sample():
     """测试内置宝马评估测试集分析结果。"""
     response = client.get("/api/v1/redteam/reports/sample")

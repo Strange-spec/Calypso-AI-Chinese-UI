@@ -24,9 +24,9 @@
               <el-icon><DataAnalysis /></el-icon>
               <span>态势大屏</span>
             </el-menu-item>
-            <el-menu-item index="/playground">
+            <el-menu-item index="/guardrails">
               <el-icon><Monitor /></el-icon>
-              <span>实时护栏测试台</span>
+              <span>安全护栏运营中心</span>
             </el-menu-item>
             <el-menu-item index="/redteam">
               <el-icon><Aim /></el-icon>
@@ -128,7 +128,12 @@ import { useConfigStore } from './stores/config'
 const route = useRoute()
 const configStore = useConfigStore()
 
-const activeMenu = computed(() => route.path)
+const activeMenu = computed(() => {
+  if (route.path.startsWith('/playground') || route.path.startsWith('/guardrails')) {
+    return '/guardrails'
+  }
+  return route.path
+})
 
 const currentRouteTitle = computed(() => {
   return route.meta?.title || '控制台'

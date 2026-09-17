@@ -1,19 +1,100 @@
 <template>
   <div class="playground-view">
-    <!-- 头部说明条 -->
-    <div class="playground-header">
-      <div class="header-intro">
-        <h2 class="view-title">实时安全护栏测试台 (Playground)</h2>
-        <span class="view-desc">
-          输入任意测试提示词或选用 G01~G10 经典对抗案例，实时评估 Calypso 防护网关的拦截判定、置信度得分及 PII 脱敏效果。
-        </span>
+    <!-- 头部：项目选择器与项目护栏规则态势 -->
+    <el-card class="project-scope-card" shadow="never">
+      <div class="project-scope-content">
+        <div class="scope-left">
+          <div class="scope-label">
+            <el-icon class="label-icon"><Aim /></el-icon>
+            <span class="label-text">测试目标业务项目 (Target Project):</span>
+          </div>
+          <el-select
+            v-model="activeProjectId"
+            placeholder="请选择需要测试的安全护栏项目"
+            style="width: 320px"
+            @change="handleProjectChange"
+            v-loading="loadingProjects"
+          >
+            <el-option
+              v-for="proj in projectsList"
+              :key="proj.id"
+              :label="`${proj.name} [${proj.type || 'app'}]`"
+              :value="proj.id"
+            >
+              <div class="project-select-opt">
+                <span class="opt-name">{{ proj.name }}</span>
+                <el-tag size="small" :type="getTypeTag(proj.type)" effect="plain">
+                  {{ proj.type || 'app' }}
+                </el-tag>
+              </div>
+            </el-option>
+          </el-select>
+
+          <!-- 应用项目参数按钮 -->
+          <el-button
+            type="primary"
+            size="default"
+            class="apply-project-btn"
+            @click="applyProjectToPlayground"
+          >
+            <el-icon><Check /></el-icon>
+            <span>应用项目参数至测试台</span>
+          </el-button>
+
+          <!-- Project ID 快捷展示与复制 -->
+          <div v-if="currentProject" class="project-id-badge">
+            <span class="id-title">Project ID:</span>
+            <el-tag size="small" effect="plain" class="id-tag">{{ currentProject.id }}</el-tag>
+            <el-button
+              link
+              type="primary"
+              size="small"
+              icon="CopyDocument"
+              @click="copyProjectId"
+            >
+              复制
+            </el-button>
+          </div>
+        </div>
+
+        <div class="scope-right">
+          <el-tag :type="configStore.isOnline ? 'success' : 'warning'" effect="light">
+            {{ configStore.isOnline ? 'Calypso 在线集群 API' : '离线智能模拟 (Demo)' }}
+          </el-tag>
+        </div>
       </div>
-      <div class="header-status">
-        <el-tag :type="configStore.isOnline ? 'success' : 'warning'" effect="light">
-          当前模式: {{ configStore.isOnline ? '在线集群 API' : '内置智能模拟 (Demo)' }}
-        </el-tag>
+
+      <!-- 当前项目生效规则徽章条 -->
+      <div v-if="currentProject" class="active-rules-bar">
+        <div class="rules-bar-label">
+          <span>当前项目生效 Guardrails 规则 ({{ currentProjectScanners.length }}项):</span>
+        </div>
+        <div class="active-rules-tags">
+          <template v-if="currentProjectScanners.length > 0">
+            <el-tooltip
+              v-for="scanner in currentProjectScanners"
+              :key="scanner.id"
+              :content="`模式: ${scanner.mode || 'block'} | 阻断: ${scanner.blocking !== false ? '开启' : '关闭'}`"
+              placement="top"
+            >
+              <el-tag
+                size="small"
+                :type="scanner.mode === 'block' ? 'danger' : scanner.mode === 'redact' ? 'warning' : 'primary'"
+                effect="light"
+                class="rule-badge"
+              >
+                <el-icon><Check /></el-icon>
+                {{ scanner.name || scanner.id }}
+              </el-tag>
+            </el-tooltip>
+          </template>
+          <div v-else class="no-rules-tip">
+            <el-icon><Warning /></el-icon>
+            <span>当前项目尚未绑定任何 Guardrail 规则，所有请求将直接放行至大模型！</span>
+          </div>
+        </div>
       </div>
-    </div>
+    </el-card>
 
     <!-- 主体左右双栏布局 -->
     <div class="playground-layout">
@@ -31,12 +112,28 @@
             </el-button>
           </div>
 
+          <!-- 绑定目标项目状态指示条 -->
+          <div class="target-project-status-bar">
+            <div class="status-left">
+              <span class="status-icon">🎯</span>
+              <span class="status-label">已绑定目标业务项目:</span>
+              <el-tag size="default" type="primary" effect="dark" class="proj-badge">
+                {{ currentProject?.name || '默认业务项目' }}
+              </el-tag>
+              <span class="proj-id-code">ID: {{ boundProjectId || activeProjectId }}</span>
+            </div>
+            <el-tag size="small" type="success" effect="light">
+              <el-icon><CircleCheckFilled /></el-icon>
+              <span>参数已同步就绪</span>
+            </el-tag>
+          </div>
+
           <!-- G01~G10 用例选择器 -->
           <div class="form-item">
             <div class="item-label-row">
               <label class="item-label">预设攻防用例 (Presets):</label>
               <span v-if="selectedPresetObj" class="preset-badge">
-                预期动作: 
+                预期判定: 
                 <el-tag size="small" :type="getActionTagType(selectedPresetObj.expected_action)">
                   {{ formatAction(selectedPresetObj.expected_action) }}
                 </el-tag>
@@ -112,7 +209,7 @@
               :disabled="!promptText.trim()"
               @click="executeScan"
             >
-              <el-icon><ShieldCheck v-if="!scanning" /><Loading v-else /></el-icon>
+              <el-icon><Aim v-if="!scanning" /><Loading v-else /></el-icon>
               <span>{{ scanning ? '正在深度安全扫描...' : '执行安全检测 (Scan Prompt)' }}</span>
             </el-button>
           </div>
@@ -124,11 +221,11 @@
         <!-- 未检测状态引导 -->
         <div v-if="!scanResult && !scanning" class="result-placeholder-card">
           <el-empty
-            description="暂无检测结果。请在左侧输入 Prompt 或选择预设用例后点击「执行安全检测」"
+            description="暂无检测结果。请选择项目并在左侧输入 Prompt 点击「执行安全检测」"
             :image-size="120"
           >
             <div class="placeholder-tip">
-              <span>支持多维威胁拦截：提示词注入防御、DAN越狱检测、凭证防泄漏、代码/Base64混淆还原、中国合规 PII 敏感脱敏。</span>
+              <span>系统将使用【{{ currentProject?.name || '当前项目' }}】绑定的 Guardrails 规则集执行动态拦截与脱敏评估。</span>
             </div>
           </el-empty>
         </div>
@@ -138,7 +235,7 @@
           <div class="loading-state">
             <el-icon class="is-loading loading-icon"><Loading /></el-icon>
             <span class="loading-text">Calypso 安全流水线处理中 (Scan in progress)...</span>
-            <span class="loading-sub">执行策略匹配、置信度推断与敏感掩码转换</span>
+            <span class="loading-sub">项目 ID: {{ activeProjectId }} | 正在匹配生效护栏规则</span>
           </div>
         </div>
 
@@ -161,6 +258,10 @@
 
             <div class="decision-banner__meta">
               <div class="meta-item">
+                <span class="meta-label">测试目标业务项目</span>
+                <span class="meta-val project-badge-text">{{ scanResult.project_name || currentProject?.name }}</span>
+              </div>
+              <div class="meta-item">
                 <span class="meta-label">检测耗时</span>
                 <span class="meta-val">{{ scanDurationMs }} ms</span>
               </div>
@@ -171,25 +272,31 @@
             </div>
           </div>
 
+
           <!-- 触发扫描器列表卡片 -->
           <div class="result-section">
             <div class="section-title-row">
               <span class="section-title">
                 <el-icon class="sec-icon"><Aim /></el-icon>
-                触发扫描器与置信度 (Triggered Scanners)
+                触发规则与威胁评估 (Triggered Scanners)
               </span>
-              <el-tag
-                size="small"
-                :type="scanResult.triggered_scanners?.length ? 'danger' : 'success'"
-              >
-                {{ scanResult.triggered_scanners?.length ? `触发 ${scanResult.triggered_scanners.length} 个规则` : '全部规则校验通过' }}
-              </el-tag>
+              <div class="section-actions">
+                <el-tag
+                  size="small"
+                  :type="scanResult.triggered_scanners?.length ? 'danger' : 'success'"
+                >
+                  {{ scanResult.triggered_scanners?.length ? `命中 ${scanResult.triggered_scanners.length} 个规则` : '全部规则校验通过' }}
+                </el-tag>
+                <el-button link type="primary" size="small" @click="openLogDrawer">
+                  查看裁定报文
+                </el-button>
+              </div>
             </div>
 
             <!-- 无扫描器触发 -->
             <div v-if="!scanResult.triggered_scanners || scanResult.triggered_scanners.length === 0" class="no-scanners-box">
               <el-icon class="clean-icon"><Check /></el-icon>
-              <span>未触发任何安全风险拦截规则，符合大模型业务放行标准。</span>
+              <span>未触发当前项目下的任何拦截规则，符合大模型业务放行标准。</span>
             </div>
 
             <!-- 扫描器列表 -->
@@ -202,7 +309,7 @@
                 <div class="scanner-item__head">
                   <div class="scanner-title-wrap">
                     <span class="scanner-name">{{ sc.title || sc.name }}</span>
-                    <span class="scanner-raw-id">{{ sc.name }}</span>
+                    <span class="scanner-raw-id">{{ sc.name || sc.id }}</span>
                   </div>
                   <el-tag size="small" :type="getActionTagType(sc.action || scanResult.outcome)">
                     {{ formatAction(sc.action || scanResult.outcome) }}
@@ -214,8 +321,8 @@
                   <span class="progress-label">威胁置信度:</span>
                   <div class="progress-bar-wrap">
                     <el-progress
-                      :percentage="Math.round((sc.score !== undefined ? sc.score : 0.95) * 100)"
-                      :color="getProgressColor(sc.score)"
+                      :percentage="Math.round((sc.score !== undefined ? sc.score : (sc.confidence || 0.95)) * 100)"
+                      :color="getProgressColor(sc.score || sc.confidence)"
                       :stroke-width="8"
                       :text-inside="false"
                     />
@@ -256,28 +363,83 @@
                 <el-icon class="sec-icon"><ChatDotRound /></el-icon>
                 后端大模型处理结果 (LLM Gateway Response)
               </span>
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                icon="Document"
+                @click="openLogDrawer"
+              >
+                查看 Raw 报文
+              </el-button>
             </div>
 
-            <!-- 阻断拦截状态 -->
-            <div v-if="scanResult.outcome === 'blocked'" class="llm-blocked-alert">
-              <el-alert
-                title="网关直接阻断拦截 (Blocked at Gateway)"
-                type="error"
-                description="该输入已命中高危风险策略并在网关层丢弃，未透传至后端大语言模型，有效防止模型越狱、系统指令泄露及潜在资源滥用。"
-                show-icon
-                :closable="false"
-              />
-            </div>
-
-            <!-- 正常放行或脱敏后回复 -->
-            <div v-else class="llm-response-box">
-              <div class="llm-bubble">
-                <div class="llm-role">
-                  <span class="bot-avatar">🤖</span>
-                  <span class="bot-name">LLM Model Response</span>
+            <!-- 阻断拦截状态：展示真实网关拦截报文与丢弃说明 -->
+            <div v-if="scanResult.outcome === 'blocked'" class="llm-blocked-container">
+              <div class="interception-banner">
+                <div class="interception-header">
+                  <el-icon class="interception-icon"><CircleCloseFilled /></el-icon>
+                  <div class="interception-titles">
+                    <span class="interception-title">安全护栏网关阻断拦截 (Blocked at Gateway)</span>
+                    <span class="interception-sub">输入命中高危护栏策略，已在网关处丢弃，下游大语言模型未产生响应</span>
+                  </div>
                 </div>
+                <div class="interception-body">
+                  <div class="interception-meta-item">
+                    <span class="meta-k">目标业务项目:</span>
+                    <span class="meta-v">{{ scanResult.project_name || currentProject?.name }} (ID: {{ scanResult.project_id || activeProjectId }})</span>
+                  </div>
+                  <div class="interception-meta-item">
+                    <span class="meta-k">拦截动作:</span>
+                    <el-tag size="small" type="danger" effect="dark">直接丢弃请求 (Drop Request)</el-tag>
+                  </div>
+                  <div class="interception-meta-item" v-if="scanResult.triggered_scanners?.length">
+                    <span class="meta-k">触发规则:</span>
+                    <div class="interception-rules">
+                      <el-tag
+                        v-for="s in scanResult.triggered_scanners"
+                        :key="s.id"
+                        size="small"
+                        type="danger"
+                        effect="light"
+                      >
+                        {{ s.title || s.name || s.id }}
+                      </el-tag>
+                    </div>
+                  </div>
+                  <div class="interception-raw-text" v-if="scanResult.llm_response">
+                    <pre>{{ scanResult.llm_response }}</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 正常放行或脱敏后回复：展示真实大模型响应文本、Token 与思考链路 -->
+            <div v-else class="llm-response-box">
+              <div class="llm-model-info-bar">
+                <div class="model-badge">
+                  <span class="bot-avatar">🤖</span>
+                  <span class="bot-name">{{ scanResult.model_name || 'LLM Model Response' }}</span>
+                </div>
+                <div class="model-meta-stats" v-if="scanResult.token_usage">
+                  <el-tag size="small" type="info" effect="plain">
+                    Token: 提问 {{ scanResult.token_usage.prompt_tokens || '-' }} / 生成 {{ scanResult.token_usage.completion_tokens || '-' }} / 总计 {{ scanResult.token_usage.total_tokens || '-' }}
+                  </el-tag>
+                </div>
+              </div>
+
+              <!-- 深度思考内容 (Reasoning Content) -->
+              <div v-if="scanResult.reasoning_content" class="llm-reasoning-card">
+                <div class="reasoning-title">
+                  <el-icon><Opportunity /></el-icon>
+                  <span>模型思考过程 (Reasoning Process)</span>
+                </div>
+                <div class="reasoning-text">{{ scanResult.reasoning_content }}</div>
+              </div>
+
+              <div class="llm-bubble">
                 <div class="llm-text">
-                  {{ scanResult.llm_response || '内容已通过 Calypso 安全审核并由模型正常响应。' }}
+                  {{ scanResult.llm_response || '内容已通过 Calypso 安全审核并由下游模型正常响应。' }}
                 </div>
               </div>
             </div>
@@ -285,17 +447,60 @@
         </div>
       </div>
     </div>
+
+    <!-- 原始 JSON 抽屉 -->
+    <el-drawer
+      v-model="logDrawerVisible"
+      title="Calypso 原生安全评估报文"
+      size="45%"
+      destroy-on-close
+    >
+      <div v-if="scanResult">
+        <el-descriptions title="测试请求摘要" :column="2" border size="small">
+          <el-descriptions-item label="测试项目">
+            {{ currentProject?.name || '全局项目' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Project ID">
+            <el-text class="mono-text">{{ scanResult.project_id || activeProjectId }}</el-text>
+          </el-descriptions-item>
+          <el-descriptions-item label="最终判定">
+            <el-tag size="small" :type="getActionTagType(scanResult.outcome)">
+              {{ formatAction(scanResult.outcome) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="耗时">
+            {{ scanDurationMs }} ms
+          </el-descriptions-item>
+        </el-descriptions>
+        <div style="margin-top: 16px;">
+          <pre class="json-code"><code>{{ JSON.stringify(scanResult.raw || scanResult, null, 2) }}</code></pre>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import apiClient from '../api/client'
+import { getProjects } from '../api/projects'
 import { useConfigStore } from '../stores/config'
 import DiffViewer from '../components/DiffViewer.vue'
 
+const props = defineProps({
+  initialProjectId: {
+    type: String,
+    default: ''
+  }
+})
+
 const configStore = useConfigStore()
+
+const projectsList = ref([])
+const activeProjectId = ref(props.initialProjectId || '')
+const boundProjectId = ref(props.initialProjectId || '')
+const loadingProjects = ref(false)
 
 const presets = ref([])
 const selectedPresetId = ref('')
@@ -303,6 +508,7 @@ const promptText = ref('')
 const scanning = ref(false)
 const scanResult = ref(null)
 const scanDurationMs = ref(0)
+const logDrawerVisible = ref(false)
 
 const quickTags = [
   { id: 'G01', label: '系统指令劫持 (G01)' },
@@ -313,9 +519,75 @@ const quickTags = [
   { id: 'G10', label: '金融合规咨询 (G10)' }
 ]
 
+const currentProject = computed(() => {
+  const targetId = boundProjectId.value || activeProjectId.value
+  return projectsList.value.find((p) => p.id === targetId) || null
+})
+
+const currentProjectScanners = computed(() => {
+  return currentProject.value?.config?.scanners || []
+})
+
 const selectedPresetObj = computed(() => {
   return presets.value.find((p) => p.id === selectedPresetId.value) || null
 })
+
+import { useRoute, useRouter } from 'vue-router'
+const route = useRoute()
+const router = useRouter()
+
+// 应用选中的业务项目参数至测试台
+function applyProjectToPlayground() {
+  if (!activeProjectId.value) {
+    ElMessage.warning('请先在下拉框选择业务项目')
+    return
+  }
+  boundProjectId.value = activeProjectId.value
+  scanResult.value = null
+  ElMessage.success(`已成功应用项目【${currentProject.value?.name || activeProjectId.value}】至测试台！`)
+}
+
+// 获取项目列表
+async function fetchProjects() {
+  loadingProjects.value = true
+  try {
+    const res = await getProjects()
+    projectsList.value = res.projects || []
+    const targetId = route.query.project_id || props.initialProjectId
+    if (targetId && projectsList.value.some(p => p.id === targetId)) {
+      activeProjectId.value = targetId
+      boundProjectId.value = targetId
+    } else if (!activeProjectId.value && projectsList.value.length > 0) {
+      activeProjectId.value = projectsList.value[0].id
+      boundProjectId.value = projectsList.value[0].id
+    }
+  } catch (err) {
+    console.error('获取项目空间失败', err)
+  } finally {
+    loadingProjects.value = false
+  }
+}
+
+watch(
+  () => [route.query.project_id, props.initialProjectId],
+  ([queryId, propId]) => {
+    const target = queryId || propId
+    if (target && projectsList.value.some((p) => p.id === target)) {
+      activeProjectId.value = target
+      boundProjectId.value = target
+    }
+  }
+)
+
+watch(
+  () => configStore.mode,
+  async () => {
+    activeProjectId.value = ''
+    boundProjectId.value = ''
+    scanResult.value = null
+    await fetchProjects()
+  }
+)
 
 // 加载 G01~G10 预设用例
 async function fetchPresets() {
@@ -326,6 +598,20 @@ async function fetchPresets() {
     }
   } catch (err) {
     console.error('获取预设用例列表失败:', err)
+  }
+}
+
+function handleProjectChange(val) {
+  scanResult.value = null
+  boundProjectId.value = val
+  router.replace({ query: { ...route.query, project_id: val } })
+}
+
+function copyProjectId() {
+  const pid = boundProjectId.value || activeProjectId.value
+  if (pid) {
+    navigator.clipboard.writeText(pid)
+    ElMessage.success('已复制 Project ID: ' + pid)
   }
 }
 
@@ -347,6 +633,7 @@ function applyQuickTag(presetId) {
 function handleClear() {
   promptText.value = ''
   selectedPresetId.value = ''
+  scanResult.value = null
 }
 
 // 执行安全检测
@@ -356,12 +643,14 @@ async function executeScan() {
     return
   }
 
+  const targetProjectId = boundProjectId.value || activeProjectId.value || null
+
   scanning.value = true
   const startTime = performance.now()
   try {
     const res = await apiClient.post('/guardrails/scan', {
       prompt: promptText.value.trim(),
-      project_id: configStore.projectId || null
+      project_id: targetProjectId
     })
     const endTime = performance.now()
     scanDurationMs.value = Math.max(12, Math.round(endTime - startTime))
@@ -373,7 +662,16 @@ async function executeScan() {
   }
 }
 
+function openLogDrawer() {
+  logDrawerVisible.value = true
+}
+
 // 格式转换与标签工具
+function getTypeTag(type) {
+  const map = { global: 'warning', chat: 'success', agentic: 'danger', app: 'primary' }
+  return map[type] || 'info'
+}
+
 function formatCategory(cat) {
   const map = {
     prompt_injection: '提示词注入',
@@ -430,17 +728,25 @@ function getProgressColor(score) {
 }
 
 function formatTimestamp(isoStr) {
-  if (!isoStr) return new Date().toLocaleTimeString()
+  if (!isoStr) return '-'
   try {
     const d = new Date(isoStr)
-    return d.toLocaleTimeString()
-  } catch {
+    return d.toLocaleTimeString('zh-CN', { hour12: false })
+  } catch (e) {
     return isoStr
   }
 }
 
-onMounted(() => {
-  fetchPresets()
+watch(
+  () => props.initialProjectId,
+  (newId) => {
+    if (newId) activeProjectId.value = newId
+  }
+)
+
+onMounted(async () => {
+  await fetchProjects()
+  await fetchPresets()
 })
 </script>
 
@@ -449,86 +755,146 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  height: 100%;
 }
 
-.playground-header {
+.project-scope-card {
+  border-radius: 8px;
+  background-color: #ffffff;
+}
+
+.project-scope-content {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #ffffff;
-  padding: 16px 20px;
-  border-radius: 10px;
-  border: 1px solid #e2e8f0;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
-.view-title {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
+.scope-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.scope-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
   color: #0f172a;
+  font-size: 14px;
 }
 
-.view-desc {
-  font-size: 13px;
-  color: #64748b;
-  margin-top: 4px;
-  display: block;
+.label-icon {
+  color: #38bdf8;
 }
 
-/* 左右分栏 */
-.playground-layout {
-  display: grid;
-  grid-template-columns: 1fr 1.25fr;
-  gap: 16px;
-  align-items: start;
-}
-
-@media (max-width: 1100px) {
-  .playground-layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-.pane-card, .result-card, .result-placeholder-card {
-  background: #ffffff;
+.project-id-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #f8fafc;
+  padding: 4px 10px;
+  border-radius: 6px;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+.id-title {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.id-tag {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.active-rules-bar {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rules-bar-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.active-rules-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rule-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.no-rules-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #eab308;
+  font-size: 12px;
+}
+
+.playground-layout {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 560px;
+}
+
+.pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .pane-card {
-  padding: 20px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
+  height: 100%;
 }
 
 .pane-card__header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #f1f5f9;
-  padding-bottom: 12px;
 }
 
 .card-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1e293b;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
 }
 
 .title-icon {
-  color: #3b82f6;
-  font-size: 16px;
+  color: #38bdf8;
 }
 
 .form-item {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .item-label-row {
@@ -540,19 +906,27 @@ onMounted(() => {
 .item-label {
   font-size: 13px;
   font-weight: 500;
-  color: #475569;
+  color: #334155;
 }
 
-.preset-desc-box {
-  background: #f8fafc;
-  border-radius: 6px;
-  padding: 8px 12px;
-  font-size: 12px;
-  color: #64748b;
+.preset-badge {
   display: flex;
   align-items: center;
   gap: 6px;
-  border: 1px dashed #cbd5e1;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.preset-desc-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+  background-color: #f8fafc;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-top: 4px;
 }
 
 .quick-tags-row {
@@ -564,7 +938,7 @@ onMounted(() => {
 
 .quick-label {
   font-size: 12px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .quick-tags {
@@ -575,57 +949,61 @@ onMounted(() => {
 
 .quick-tag-btn {
   font-size: 11px;
+  padding: 3px 8px;
   background-color: #f1f5f9;
   color: #475569;
-  padding: 2px 8px;
   border-radius: 4px;
   cursor: pointer;
-  border: 1px solid #e2e8f0;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
 .quick-tag-btn:hover {
-  background-color: #e0f2fe;
-  color: #0369a1;
-  border-color: #7dd3fc;
+  background-color: #e2e8f0;
+  color: #0284c7;
 }
 
 .prompt-textarea :deep(.el-textarea__inner) {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+  font-family: inherit;
   font-size: 13px;
   line-height: 1.6;
-  border-radius: 8px;
 }
 
 .submit-action-row {
-  margin-top: 4px;
+  margin-top: auto;
 }
 
 .scan-btn {
   width: 100%;
-  font-weight: 600;
-  letter-spacing: 0.5px;
 }
 
-/* 结果栏样式 */
-.result-placeholder-card {
-  padding: 48px 24px;
+/* 右栏结果样式 */
+.result-placeholder-card,
+.result-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+  height: 100%;
   display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.result-placeholder-card {
   justify-content: center;
   align-items: center;
 }
 
 .placeholder-tip {
-  max-width: 480px;
   font-size: 12px;
   color: #94a3b8;
-  line-height: 1.6;
-  margin-top: 8px;
+  max-width: 440px;
+  margin-top: 10px;
+  line-height: 1.5;
 }
 
 .loading-card {
-  padding: 60px 20px;
-  display: flex;
   justify-content: center;
   align-items: center;
 }
@@ -634,111 +1012,94 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .loading-icon {
   font-size: 32px;
-  color: #3b82f6;
+  color: #38bdf8;
 }
 
 .loading-text {
   font-size: 15px;
-  font-weight: 600;
-  color: #334155;
+  font-weight: 500;
+  color: #0f172a;
 }
 
 .loading-sub {
   font-size: 12px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
-.result-card {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-/* 决策横幅 */
+/* 决策大横幅 */
 .decision-banner {
-  border-radius: 8px;
-  padding: 16px 20px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
+  padding: 14px 18px;
+  border-radius: 8px;
+  color: #ffffff;
 }
 
 .banner--cleared {
-  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-  border: 1px solid #86efac;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
 }
-.banner--cleared .banner-icon-box { color: #16a34a; }
-.banner--cleared .outcome-title { color: #15803d; }
 
 .banner--blocked {
-  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
-  border: 1px solid #fca5a5;
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
 }
-.banner--blocked .banner-icon-box { color: #dc2626; }
-.banner--blocked .outcome-title { color: #b91c1c; }
 
 .banner--redacted {
-  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-  border: 1px solid #fde68a;
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
 }
-.banner--redacted .banner-icon-box { color: #d97706; }
-.banner--redacted .outcome-title { color: #b45309; }
+
+.banner--flagged {
+  background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+}
 
 .decision-banner__left {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .banner-icon-box {
-  font-size: 36px;
-  display: flex;
-  align-items: center;
+  font-size: 28px;
 }
 
 .outcome-title {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
-  line-height: 1.2;
 }
 
 .outcome-sub {
   font-size: 12px;
-  color: #475569;
-  margin-top: 4px;
+  opacity: 0.92;
+  margin-top: 2px;
 }
 
 .decision-banner__meta {
   display: flex;
   gap: 16px;
+  font-size: 12px;
   text-align: right;
+  opacity: 0.9;
 }
 
 .meta-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
 .meta-label {
   font-size: 11px;
-  color: #64748b;
+  opacity: 0.8;
 }
 
 .meta-val {
-  font-size: 13px;
   font-weight: 600;
-  color: #1e293b;
 }
 
-/* 结果分区 */
 .result-section {
   display: flex;
   flex-direction: column;
@@ -752,45 +1113,52 @@ onMounted(() => {
 }
 
 .section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #1e293b;
   display: flex;
   align-items: center;
   gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
 }
 
 .sec-icon {
-  color: #3b82f6;
+  color: #38bdf8;
 }
 
-.no-scanners-box {
-  background: #f8fafc;
-  border: 1px dashed #cbd5e1;
-  border-radius: 6px;
-  padding: 12px 16px;
-  font-size: 13px;
-  color: #16a34a;
+.section-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
+.no-scanners-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  color: #166534;
+  font-size: 13px;
+}
+
 .clean-icon {
+  color: #16a34a;
   font-size: 16px;
 }
 
 .scanners-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .scanner-item {
-  background: #fafaf9;
+  background-color: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 12px 14px;
+  border-radius: 6px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -809,7 +1177,7 @@ onMounted(() => {
 }
 
 .scanner-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #0f172a;
 }
@@ -817,21 +1185,19 @@ onMounted(() => {
 .scanner-raw-id {
   font-size: 11px;
   color: #94a3b8;
-  background: #f1f5f9;
-  padding: 1px 6px;
-  border-radius: 4px;
+  font-family: monospace;
 }
 
 .scanner-progress-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .progress-label {
   font-size: 12px;
   color: #64748b;
-  width: 70px;
+  width: 72px;
 }
 
 .progress-bar-wrap {
@@ -839,27 +1205,33 @@ onMounted(() => {
 }
 
 .scanner-reason {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   font-size: 12px;
-  background: #ffffff;
-  border: 1px solid #f1f5f9;
+  background-color: #ffffff;
   padding: 6px 10px;
   border-radius: 4px;
-  color: #475569;
-  display: flex;
-  gap: 6px;
 }
 
 .reason-label {
-  font-weight: 600;
-  color: #dc2626;
+  color: #64748b;
+  font-weight: 500;
 }
 
-/* 大模型回复卡片 */
-.llm-bubble {
-  background: #f8fafc;
+.reason-text {
+  color: #334155;
+  line-height: 1.4;
+}
+
+.llm-response-box {
+  background-color: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 14px 16px;
+  border-radius: 6px;
+  padding: 14px;
+}
+
+.llm-bubble {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -883,28 +1255,190 @@ onMounted(() => {
 
 .llm-text {
   font-size: 13px;
+  color: #1e293b;
   line-height: 1.6;
-  color: #0f172a;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
-.preset-option-item {
+.mono-text {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.json-code {
+  background-color: #0f172a;
+  color: #38bdf8;
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  overflow-x: auto;
+  max-height: 380px;
+}
+
+.apply-project-btn {
+  margin-left: 8px;
+}
+
+.target-project-status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin-bottom: 16px;
+}
+
+.target-project-status-bar .status-left {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
+  gap: 8px;
 }
-.preset-opt-id {
-  font-weight: 700;
-  color: #2563eb;
-  margin-right: 6px;
+
+.target-project-status-bar .status-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #166534;
 }
-.preset-opt-name {
-  flex: 1;
+
+.target-project-status-bar .proj-id-code {
+  font-size: 11px;
+  color: #15803d;
+  font-family: monospace;
+  background: #dcfce7;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* 阻断拦截展示卡片 */
+.llm-blocked-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.interception-banner {
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 8px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-right: 8px;
+}
+
+.interception-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #ffe4e6;
+  border-bottom: 1px solid #fecdd3;
+}
+
+.interception-icon {
+  font-size: 24px;
+  color: #e11d48;
+}
+
+.interception-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.interception-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #9f1239;
+}
+
+.interception-sub {
+  font-size: 12px;
+  color: #be123c;
+}
+
+.interception-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.interception-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.interception-meta-item .meta-k {
+  font-weight: 600;
+  color: #475569;
+  width: 90px;
+}
+
+.interception-meta-item .meta-v {
+  color: #1e293b;
+  font-family: monospace;
+}
+
+.interception-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.interception-raw-text {
+  margin-top: 6px;
+  background: #ffffff;
+  border: 1px solid #fda4af;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-family: monospace;
+  font-size: 12px;
+  color: #9f1239;
+}
+
+.interception-raw-text pre {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* 正常放行大模型响应 */
+.llm-model-info-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #cbd5e1;
+}
+
+.llm-reasoning-card {
+  background: #f8fafc;
+  border-left: 3px solid #8b5cf6;
+  border-radius: 4px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.llm-reasoning-card .reasoning-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #7c3aed;
+  margin-bottom: 4px;
+}
+
+.llm-reasoning-card .reasoning-text {
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.project-select-opt {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 </style>

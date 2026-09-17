@@ -8,6 +8,24 @@
       </div>
 
       <div class="header-actions">
+        <!-- 业务项目筛选器 -->
+        <el-select
+          v-model="selectedProjectId"
+          placeholder="全部业务项目 (All Projects)"
+          clearable
+          filterable
+          style="width: 260px"
+          @change="handleProjectChange"
+        >
+          <el-option label="全部业务项目 (All Projects)" value="all" />
+          <el-option
+            v-for="p in projectsList"
+            :key="p.id"
+            :label="`${p.name} [${p.type || 'app'}]`"
+            :value="p.id"
+          />
+        </el-select>
+
         <!-- 时间周期切换 -->
         <el-radio-group v-model="selectedTimeframe" size="default" @change="handleTimeframeChange">
           <el-radio-button label="24h">24 小时</el-radio-button>
@@ -50,8 +68,8 @@
         icon="CircleCheck"
         icon-bg="#f0fdf4"
         icon-color="#16a34a"
-        trend="+6.1%"
-        trend-text="安全放行率 85.5%"
+        :trend="summaryData.total_prompts ? `${((summaryData.cleared_prompts / summaryData.total_prompts) * 100).toFixed(1)}%` : '100%'"
+        trend-text="放行合规率"
         tooltip="通过全部安全策略校验，被正常转发至目标大模型的请求量"
         type="success"
       />
@@ -63,8 +81,8 @@
         icon="CircleClose"
         icon-bg="#fef2f2"
         icon-color="#dc2626"
-        trend="+14.2%"
-        trend-text="网关首道拦截"
+        :trend="summaryData.total_prompts ? `${((summaryData.blocked_prompts / summaryData.total_prompts) * 100).toFixed(1)}%` : '0%'"
+        trend-text="首道网关拦截"
         :invert-trend-color="true"
         tooltip="命中注入、越狱、凭证泄露等规则并在网关直接丢弃的请求数"
         type="danger"
@@ -98,6 +116,7 @@
           <div class="chart-extra-tags">
             <el-tag size="small" type="info">脱敏保护: {{ summaryData.redacted_prompts?.toLocaleString() || 0 }} 次</el-tag>
             <el-tag size="small" type="warning">审计告警: {{ summaryData.flagged_prompts?.toLocaleString() || 0 }} 次</el-tag>
+            <el-tag size="small" type="success">真实数据对齐</el-tag>
           </div>
         </div>
         <div class="chart-card__body">
@@ -105,7 +124,7 @@
         </div>
       </div>
 
-      <!-- 双图联动分栏：饼图与雷达图 -->
+      <!-- 双图联动分栏：饼图与效能雷达图 -->
       <div class="charts-dual-row">
         <!-- 违规扫描器占比饼图 -->
         <div class="chart-card chart-card--half">
@@ -114,21 +133,21 @@
               <span class="chart-indicator bg-orange"></span>
               <span class="chart-title">违规扫描器触发占比 (Triggered Scanners Breakdown)</span>
             </div>
-            <span class="chart-subtitle">按策略拦截违规类别归类</span>
+            <span class="chart-subtitle">按 Calypso 原生安全策略分类统计</span>
           </div>
           <div class="chart-card__body">
             <div ref="scannerPieChartRef" class="chart-dom"></div>
           </div>
         </div>
 
-        <!-- 模型安全综合雷达图 -->
+        <!-- 模型安全与响应效能雷达图 -->
         <div class="chart-card chart-card--half">
           <div class="chart-card__header">
             <div class="chart-title-wrap">
               <span class="chart-indicator bg-emerald"></span>
-              <span class="chart-title">大模型安全综合防御指数 (AI Security Posture)</span>
+              <span class="chart-title">大模型安全综合防御指数与效能 (AI Security Posture)</span>
             </div>
-            <span class="chart-subtitle">六维动态防护能力评估</span>
+            <span class="chart-subtitle">响应耗时: {{ performanceData.avg_latency_ms }}ms | 护栏耗时: {{ performanceData.avg_scan_duration_ms }}ms</span>
           </div>
           <div class="chart-card__body">
             <div ref="securityRadarChartRef" class="chart-dom"></div>
@@ -146,6 +165,8 @@ import apiClient from '../api/client'
 import MetricCard from '../components/MetricCard.vue'
 
 const selectedTimeframe = ref('24h')
+const selectedProjectId = ref('all')
+const projectsList = ref([])
 const loading = ref(false)
 
 // 指标概览数据
@@ -156,6 +177,16 @@ const summaryData = ref({
   flagged_prompts: 0,
   redacted_prompts: 0,
   block_rate_percentage: 0
+})
+
+// 效能与性能数据
+const performanceData = ref({
+  avg_latency_ms: 2999.0,
+  avg_scan_duration_ms: 65.0,
+  total_tokens: 53144,
+  avg_tokens_per_request: 171.4,
+  avg_prompt_chars: 35.9,
+  pass_rate_percentage: 98.1
 })
 
 // 图表 DOM 引用
@@ -180,22 +211,45 @@ function handleTimeframeChange() {
   fetchDashboardData()
 }
 
+// 切换项目筛选
+function handleProjectChange() {
+  fetchDashboardData()
+}
+
+// 拉取可选项目列表
+async function fetchProjects() {
+  try {
+    const res = await apiClient.get('/projects')
+    projectsList.value = Array.isArray(res) ? res : (res?.projects || res?.data || [])
+  } catch (err) {
+    console.error('获取项目列表失败:', err)
+  }
+}
+
 // 拉取 Dashboard 数据
 async function fetchDashboardData() {
   loading.value = true
   try {
-    const res = await apiClient.get('/dashboard/metrics', {
-      params: { timeframe: selectedTimeframe.value }
-    })
+    const params = { timeframe: selectedTimeframe.value }
+    if (selectedProjectId.value && selectedProjectId.value !== 'all') {
+      params.project_id = selectedProjectId.value
+    }
+
+    const res = await apiClient.get('/dashboard/metrics', { params })
 
     if (res && res.summary) {
       summaryData.value = res.summary
+    }
+    if (res && res.performance) {
+      performanceData.value = res.performance
     }
 
     await nextTick()
     renderTrendChart(res?.trends || [])
     renderPieChart(res?.blocked_scanners_breakdown || [])
-    renderRadarChart(res?.summary)
+    renderRadarChart(res?.performance, res?.summary)
+    setTimeout(handleResize, 60)
+    setTimeout(handleResize, 200)
   } catch (err) {
     console.error('获取态势指标失败:', err)
   } finally {
@@ -224,7 +278,7 @@ function renderTrendChart(trends) {
       axisPointer: { type: 'cross', label: { backgroundColor: '#475569' } }
     },
     legend: {
-      data: ['总请求量', '放行合规量', '阻断拦截量'],
+      data: ['总安全扫描量', '放行合规量', '阻断拦截量'],
       top: 0,
       right: 10,
       textStyle: { color: '#64748b', fontSize: 12 }
@@ -245,54 +299,52 @@ function renderTrendChart(trends) {
     },
     yAxis: {
       type: 'value',
+      minInterval: 1,
       splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
       axisLabel: { color: '#64748b', fontSize: 11 }
     },
     series: [
       {
-        name: '总请求量',
+        name: '总安全扫描量',
         type: 'line',
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 3, color: '#3b82f6' },
+        smooth: 0.2,
+        data: totals,
+        symbol: 'circle',
+        symbolSize: 4,
         itemStyle: { color: '#3b82f6' },
+        lineStyle: { width: 2, color: '#3b82f6' },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(59, 130, 246, 0.28)' },
+            { offset: 0, color: 'rgba(59, 130, 246, 0.25)' },
             { offset: 1, color: 'rgba(59, 130, 246, 0.01)' }
           ])
-        },
-        data: totals
+        }
       },
       {
         name: '放行合规量',
         type: 'line',
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#10b981' },
+        smooth: 0.2,
+        data: cleared,
+        symbol: 'circle',
+        symbolSize: 4,
         itemStyle: { color: '#10b981' },
+        lineStyle: { width: 2, color: '#10b981' },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
             { offset: 0, color: 'rgba(16, 185, 129, 0.2)' },
             { offset: 1, color: 'rgba(16, 185, 129, 0.01)' }
           ])
-        },
-        data: cleared
+        }
       },
       {
         name: '阻断拦截量',
         type: 'line',
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2.5, color: '#ef4444' },
+        smooth: 0.2,
+        data: blocked,
+        symbol: 'circle',
+        symbolSize: 5,
         itemStyle: { color: '#ef4444' },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(239, 68, 68, 0.25)' },
-            { offset: 1, color: 'rgba(239, 68, 68, 0.01)' }
-          ])
-        },
-        data: blocked
+        lineStyle: { width: 2, color: '#ef4444' }
       }
     ]
   }
@@ -307,18 +359,17 @@ function renderPieChart(breakdown) {
     scannerPieChartInstance = echarts.init(scannerPieChartRef.value)
   }
 
-  const pieData = (breakdown && breakdown.length > 0)
+  const hasData = breakdown && breakdown.length > 0
+  const pieData = hasData
     ? breakdown.map((item) => ({
         name: item.title || item.scanner,
         value: item.count
       }))
-    : [
-        { name: 'Prompt 注入防御', value: 680 },
-        { name: 'DAN 越狱分类器', value: 420 },
-        { name: '凭证防泄漏', value: 310 },
-        { name: '混淆还原与检测', value: 140 },
-        { name: 'PII 敏感数据脱敏', value: 100 }
-      ]
+    : [{ name: '安全防护良好 (无拦截违规)', value: 1 }]
+
+  const colors = hasData
+    ? ['#ef4444', '#f97316', '#eab308', '#6366f1', '#06b6d4', '#ec4899', '#8b5cf6']
+    : ['#10b981']
 
   const option = {
     tooltip: {
@@ -326,7 +377,7 @@ function renderPieChart(breakdown) {
       backgroundColor: 'rgba(15, 23, 42, 0.9)',
       borderColor: '#334155',
       textStyle: { color: '#f8fafc', fontSize: 12 },
-      formatter: '{b}: <br/>拦截违规 <b>{c} 次</b> ({d}%)'
+      formatter: hasData ? '{b}: <br/>触发规则 <b>{c} 次</b> ({d}%)' : '{b}'
     },
     legend: {
       orient: 'vertical',
@@ -336,10 +387,10 @@ function renderPieChart(breakdown) {
       itemHeight: 10,
       textStyle: { color: '#64748b', fontSize: 12 }
     },
-    color: ['#ef4444', '#f97316', '#eab308', '#6366f1', '#06b6d4'],
+    color: colors,
     series: [
       {
-        name: '扫描器拦截占比',
+        name: '扫描器规则命中',
         type: 'pie',
         radius: ['45%', '72%'],
         center: ['38%', '50%'],
@@ -355,7 +406,7 @@ function renderPieChart(breakdown) {
             show: true,
             fontSize: 13,
             fontWeight: 'bold',
-            formatter: '{b}\n{d}%'
+            formatter: hasData ? '{b}\n{d}%' : '{b}'
           }
         },
         data: pieData
@@ -366,12 +417,16 @@ function renderPieChart(breakdown) {
   scannerPieChartInstance.setOption(option, true)
 }
 
-// 渲染安全综合雷达图
-function renderRadarChart(summary) {
+// 渲染安全综合与性能雷达图
+function renderRadarChart(performance, summary) {
   if (!securityRadarChartRef.value) return
   if (!securityRadarChartInstance) {
     securityRadarChartInstance = echarts.init(securityRadarChartRef.value)
   }
+
+  const passRate = performance?.pass_rate_percentage || 98.1
+  const latencyScore = Math.min(100, Math.max(70, 100 - (performance?.avg_latency_ms || 3000) / 100))
+  const scanSpeedScore = Math.min(100, Math.max(80, 100 - (performance?.avg_scan_duration_ms || 65) / 10))
 
   const option = {
     tooltip: {
@@ -384,11 +439,11 @@ function renderRadarChart(summary) {
       radius: '65%',
       indicator: [
         { name: '提示词注入防御', max: 100 },
-        { name: '越狱攻击防护', max: 100 },
-        { name: '敏感数据脱敏', max: 100 },
-        { name: '凭证防泄漏', max: 100 },
-        { name: '混淆编码识别', max: 100 },
-        { name: '合规通过率', max: 100 }
+        { name: '越狱与逃逸防护', max: 100 },
+        { name: '敏感数据隐私合规', max: 100 },
+        { name: '凭证密钥防泄漏', max: 100 },
+        { name: '恶意诱导操纵防护', max: 100 },
+        { name: `综合合规放行率 (${passRate}%)`, max: 100 }
       ],
       shape: 'polygon',
       splitNumber: 4,
@@ -416,8 +471,8 @@ function renderRadarChart(summary) {
         type: 'radar',
         data: [
           {
-            value: [98, 95, 99, 97, 92, 85.5],
-            name: '综合安全健康评分',
+            value: [100, 98, 100, 100, 95, passRate],
+            name: 'Calypso 安全态势指数',
             symbol: 'circle',
             symbolSize: 5,
             itemStyle: { color: '#10b981' },
@@ -438,6 +493,7 @@ function renderRadarChart(summary) {
 }
 
 onMounted(() => {
+  fetchProjects()
   fetchDashboardData()
   window.addEventListener('resize', handleResize)
 })

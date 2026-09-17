@@ -20,6 +20,26 @@
     <!-- 筛选搜索栏 -->
     <div class="filter-card">
       <div class="filter-row">
+        <!-- 业务项目筛选 -->
+        <div class="filter-item">
+          <span class="filter-label">业务项目:</span>
+          <el-select
+            v-model="selectedProjectId"
+            placeholder="全部项目"
+            clearable
+            style="width: 220px"
+            @change="handleFilterChange"
+          >
+            <el-option label="全部业务项目" value="" />
+            <el-option
+              v-for="p in projectsList"
+              :key="p.id"
+              :label="`${p.name}`"
+              :value="p.id"
+            />
+          </el-select>
+        </div>
+
         <!-- 判定结果筛选 -->
         <div class="filter-item">
           <span class="filter-label">判定结果:</span>
@@ -60,6 +80,14 @@
           </template>
         </el-table-column>
 
+        <el-table-column label="所属业务项目" min-width="160">
+          <template #default="{ row }">
+            <div class="project-cell">
+              <span class="project-title">{{ row.project_name || getProjectName(row.project_id) }}</span>
+            </div>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="outcome" label="判定动作" width="110" align="center">
           <template #default="{ row }">
             <el-tag :type="getOutcomeTagType(row.outcome)" size="small" effect="light">
@@ -67,6 +95,7 @@
             </el-tag>
           </template>
         </el-table-column>
+
 
         <el-table-column prop="prompt" label="提示词内容摘要 (Prompt Snippet)" min-width="260">
           <template #default="{ row }">
@@ -207,20 +236,40 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import apiClient from '../api/client'
+import { getProjects } from '../api/projects'
+import { useConfigStore } from '../stores/config'
 
+const configStore = useConfigStore()
 const loading = ref(false)
 const logs = ref([])
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const filterOutcome = ref('')
+const selectedProjectId = ref('')
 const searchKeyword = ref('')
+const projectsList = ref([])
 
 const drawerVisible = ref(false)
 const selectedLog = ref(null)
+
+async function fetchProjects() {
+  try {
+    const res = await getProjects()
+    projectsList.value = res.projects || []
+  } catch (err) {
+    console.error('获取项目列表失败:', err)
+  }
+}
+
+function getProjectName(pid) {
+  if (!pid) return '通用全局项目'
+  const found = projectsList.value.find((p) => p.id === pid)
+  return found ? found.name : pid.slice(0, 8) + '...'
+}
 
 // 客户端搜索过滤
 const filteredLogs = computed(() => {
@@ -246,6 +295,9 @@ async function fetchLogs() {
     if (filterOutcome.value) {
       params.outcome = filterOutcome.value
     }
+    if (selectedProjectId.value) {
+      params.project_id = selectedProjectId.value
+    }
 
     const res = await apiClient.get('/audit/logs', { params })
     if (res && res.items) {
@@ -263,6 +315,7 @@ function handleFilterChange() {
   currentPage.value = 1
   fetchLogs()
 }
+
 
 function handleSearch() {
   // 搜索仅在前端当前页过滤，重置无需额外请求
@@ -348,10 +401,21 @@ function copyText(text, successMsg = '已复制') {
   })
 }
 
-onMounted(() => {
-  fetchLogs()
+onMounted(async () => {
+  await fetchProjects()
+  await fetchLogs()
 })
+
+watch(
+  () => configStore.mode,
+  async () => {
+    selectedProjectId.value = ''
+    await fetchProjects()
+    await fetchLogs()
+  }
+)
 </script>
+
 
 <style scoped>
 .audit-view {

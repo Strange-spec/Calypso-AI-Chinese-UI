@@ -230,8 +230,9 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConfigStore } from '../stores/config'
+
 
 const configStore = useConfigStore()
 
@@ -281,6 +282,24 @@ async function handleTestConnection() {
 
 // 保存配置
 async function handleSaveConfig() {
+  if (configStore.mode === 'online' && form.mode === 'demo') {
+    try {
+      await ElMessageBox.confirm(
+        '当前系统处于生产/私有集群在线模式 (Online)。切换为内置演示模式 (Demo) 将仅展示静态模拟数据，断开与 Calypso AI 实时集群的同步。确定要切换为演示模式吗？',
+        '切换运行模式二次确认',
+        {
+          confirmButtonText: '确认切换为演示模式',
+          cancelButtonText: '取消',
+          type: 'warning',
+          confirmButtonClass: 'el-button--danger'
+        }
+      )
+    } catch {
+      form.mode = 'online'
+      return
+    }
+  }
+
   saving.value = true
   try {
     await configStore.updateConfig({
@@ -292,6 +311,7 @@ async function handleSaveConfig() {
     })
     ElMessage.success('系统配置已成功保存')
   } catch (err) {
+
     console.error('保存配置失败:', err)
   } finally {
     saving.value = false

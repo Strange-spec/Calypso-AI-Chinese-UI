@@ -9,15 +9,18 @@ const apiClient = axios.create({
   }
 })
 
-// 请求拦截器：自动注入 Token
+// 请求拦截器：自动注入 Token 与 运行模式 X-Calypso-Mode
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('calypso_api_token')
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`
     }
+    const mode = localStorage.getItem('calypso_mode') || 'demo'
+    config.headers['X-Calypso-Mode'] = mode
     return config
   },
+
   (error) => {
     return Promise.reject(error)
   }

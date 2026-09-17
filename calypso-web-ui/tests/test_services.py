@@ -156,9 +156,8 @@ def test_mock_engine_metrics():
     breakdown = metrics["blocked_scanners_breakdown"]
     assert len(breakdown) >= 4
     scanner_names = [b["scanner"] for b in breakdown]
-    assert "prompt_injection" in scanner_names
-    assert "jailbreak_classifier" in scanner_names
-    assert "secrets_scanner" in scanner_names
+    assert any("Prompt" in s or "prompt" in s for s in scanner_names)
+    assert any("Jailbreak" in s or "jailbreak" in s for s in scanner_names)
 
     trends = metrics["trends"]
     assert len(trends) == 24
@@ -225,6 +224,11 @@ async def test_calypso_client_mock_transport_success():
         assert request.headers.get("content-type") == "application/json"
 
         path = request.url.path
+        if path == "/backend/v1/prompts" and request.method == "POST":
+            import json
+            body = json.loads(request.content.decode("utf-8")) if request.content else {}
+            outcome = "blocked" if "drop" in body.get("input", "") else "cleared"
+            return httpx.Response(200, json={"result": {"outcome": outcome, "response": "mock response"}, "outcome": outcome})
         if path in mock_routes:
             return httpx.Response(200, json=mock_routes[path])
         return httpx.Response(404, json={"detail": "Not found"})

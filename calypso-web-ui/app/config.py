@@ -30,3 +30,13 @@ def get_effective_token(request=None) -> Optional[str]:
             if val:
                 return val
     return settings.calypso_api_token
+
+
+def get_effective_mode(request=None) -> str:
+    """从 HTTP X-Calypso-Mode 请求头优先提取运行模式 ('demo' 或 'online')，缺省则回退至全局配置。"""
+    if request is not None and hasattr(request, "headers"):
+        mode = request.headers.get("x-calypso-mode") or request.headers.get("X-Calypso-Mode")
+        if mode and mode.lower() in ("demo", "online"):
+            return mode.lower()
+    return settings.app_mode.lower()
+

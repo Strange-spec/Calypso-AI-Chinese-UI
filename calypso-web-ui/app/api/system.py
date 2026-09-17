@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.config import settings, get_effective_token
+from app.config import settings, get_effective_token, get_effective_mode
 from app.services.calypso_client import CalypsoClient, CalypsoClientError
 
 router = APIRouter(prefix="/system", tags=["System"])
@@ -29,15 +29,17 @@ class ConnectionTestRequest(BaseModel):
 async def get_system_status(request: Request) -> Dict[str, Any]:
     """获取当前系统状态、运行模式与配置概要。"""
     current_token = get_effective_token(request)
+    effective_mode = get_effective_mode(request)
     return {
         "status": "ok",
         "app_name": settings.app_name,
         "version": settings.version,
-        "mode": settings.app_mode,
+        "mode": effective_mode,
         "base_url": settings.calypso_base_url,
         "has_token": bool(current_token),
         "project_id": settings.default_project_id,
     }
+
 
 
 @router.post("/config")

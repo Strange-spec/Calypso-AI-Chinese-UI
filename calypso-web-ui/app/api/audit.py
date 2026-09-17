@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.config import settings, get_effective_token
+from app.config import settings, get_effective_token, get_effective_mode
 from app.services.mock_data import mock_engine
 from app.services.calypso_client import CalypsoClient, CalypsoClientError
 
@@ -58,8 +58,25 @@ async def get_audit_logs(
     project_id: Optional[str] = Query(None, description="按项目 ID 筛选"),
 ) -> Dict[str, Any]:
     """获取系统安全防护与审计事件日志列表，支持分页与条件筛选。"""
-    if settings.app_mode == "demo":
+    mode = get_effective_mode(request)
+    if mode == "demo":
         all_logs = _generate_demo_audit_logs()
+        # 融入 mock_engine 产生的最新审计流水
+        for l in mock_engine.audit_logs:
+            all_logs.insert(0, {
+                "id": l["id"],
+                "timestamp": l["receivedAt"],
+                "project_id": l["projectId"],
+                "project_name": l.get("projectName"),
+                "prompt": l["input"],
+                "redacted_prompt": l.get("redactedInput", l["input"]),
+                "outcome": l["outcome"],
+                "risk_level": "high" if l["outcome"] == "blocked" else ("medium" if l["outcome"] == "redacted" else "low"),
+                "category": "guardrail",
+                "client_ip": "127.0.0.1",
+                "triggered_scanners": [{"title": t, "action": l["outcome"]} for t in l.get("triggeredScanners", [])],
+            })
+
         if outcome:
             outcome_norm = outcome.strip().lower()
             all_logs = [log for log in all_logs if log.get("outcome") == outcome_norm]
@@ -70,7 +87,6 @@ async def get_audit_logs(
         start = (page - 1) * page_size
         end = start + page_size
         paged_items = all_logs[start:end]
-
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
 
         return {
@@ -86,7 +102,7 @@ async def get_audit_logs(
     try:
         outcomes_list = [outcome] if outcome else None
         res = await client.get_prompts(
-            project_id=project_id or settings.default_project_id,
+            project_id=project_id,
             outcomes=outcomes_list,
             limit=min(page_size * page, 100),
         )
@@ -96,10 +112,59 @@ async def get_audit_logs(
         elif isinstance(res, dict):
             items = res.get("prompts") or res.get("data") or res.get("items") or []
 
-        total = len(items)
+        # 格式化为 AuditLogs 结构
+        formatted_items = []
+        for p in items:
+            p_res = p.get("result") or {}
+            p_outcome = p_res.get("outcome") or p.get("outcome") or "cleared"
+            p_pid = p.get("projectId") or p.get("project_id")
+            scanner_results = p_res.get("scannerResults") or []
+            triggered = []
+            for sr in scanner_results:
+                if sr.get("outcome") in ("failed", "blocked", "flagged"):
+                    meta = sr.get("scannerVersionMeta") or {}
+                    triggered.append({
+                        "name": sr.get("scannerId"),
+                        "title": meta.get("name") or sr.get("scannerId"),
+                        "action": sr.get("outcome"),
+                        "score": sr.get("confidence", 0.95),
+                    })
+
+            formatted_items.append({
+                "id": p.get("id"),
+                "timestamp": p.get("receivedAt") or p.get("createdAt"),
+                "project_id": p_pid,
+                "prompt": p.get("input", ""),
+                "redacted_prompt": p.get("redactedInput") or p.get("input", ""),
+                "outcome": p_outcome,
+                "risk_level": "high" if p_outcome in ("blocked", "failed") else ("medium" if p_outcome == "redacted" else "low"),
+                "category": "guardrail",
+                "client_ip": "10.0.0.1",
+                "triggered_scanners": triggered,
+            })
+
+        # 融入刚刚在该项目下测试的审计记录
+        for l in mock_engine.audit_logs:
+            if not project_id or l.get("projectId") == project_id:
+                if not outcome or l.get("outcome") == outcome.strip().lower():
+                    formatted_items.insert(0, {
+                        "id": l["id"],
+                        "timestamp": l["receivedAt"],
+                        "project_id": l["projectId"],
+                        "project_name": l.get("projectName"),
+                        "prompt": l["input"],
+                        "redacted_prompt": l.get("redactedInput", l["input"]),
+                        "outcome": l["outcome"],
+                        "risk_level": "high" if l["outcome"] == "blocked" else ("medium" if l["outcome"] == "redacted" else "low"),
+                        "category": "guardrail",
+                        "client_ip": "127.0.0.1",
+                        "triggered_scanners": [{"title": t, "action": l["outcome"]} for t in l.get("triggeredScanners", [])],
+                    })
+
+        total = len(formatted_items)
         start = (page - 1) * page_size
         end = start + page_size
-        paged_items = items[start:end]
+        paged_items = formatted_items[start:end]
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
 
         return {
@@ -113,3 +178,4 @@ async def get_audit_logs(
         raise HTTPException(status_code=502, detail=f"拉取 Calypso 审计日志失败: {str(exc)}")
     finally:
         await client.close()
+
