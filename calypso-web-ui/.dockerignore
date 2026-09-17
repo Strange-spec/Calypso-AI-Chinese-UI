@@ -23,9 +23,6 @@ web/node_modules/
 web/dist/
 web/.vite/
 
-# App static files (built during multi-stage docker build)
-app/static/
-
 # Environment files
 .env
 .env.*

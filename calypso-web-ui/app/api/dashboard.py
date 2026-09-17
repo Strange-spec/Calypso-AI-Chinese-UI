@@ -23,7 +23,7 @@ async def get_dashboard_metrics(
     client = CalypsoClient(base_url=settings.calypso_base_url, token=settings.calypso_api_token)
     try:
         resolved_project = project_id or settings.default_project_id
-        res = await client.get_prompts(project_id=resolved_project, limit=500)
+        res = await client.get_prompts(project_id=resolved_project, limit=100)
         prompts = []
         if isinstance(res, list):
             prompts = res

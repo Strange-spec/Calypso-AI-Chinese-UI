@@ -35,16 +35,25 @@ async def scan_prompt(req: ScanRequest) -> Dict[str, Any]:
     if not req.prompt or not req.prompt.strip():
         raise HTTPException(status_code=400, detail="提示词内容不能为空")
 
-    project_id = req.project_id or settings.default_project_id or "proj_default_china"
-
     # Demo 离线模式
     if settings.app_mode == "demo":
+        project_id = req.project_id or settings.default_project_id or "proj_default_china"
         return mock_engine.scan_prompt(prompt=req.prompt, project_id=project_id)
 
     # Online 在线模式
     client = CalypsoClient(base_url=settings.calypso_base_url, token=settings.calypso_api_token)
     try:
-        raw_res = await client.scan_prompt(prompt=req.prompt, project_id=project_id)
+        resolved_project = req.project_id or settings.default_project_id
+        if not resolved_project:
+            try:
+                projects = await client.list_projects()
+                if projects and isinstance(projects, list) and len(projects) > 0:
+                    first_p = projects[0]
+                    resolved_project = first_p.get("id") or first_p.get("projectId")
+            except Exception:
+                pass
+
+        raw_res = await client.scan_prompt(prompt=req.prompt, project_id=resolved_project)
         now = datetime.now(timezone.utc).isoformat()
 
         # 规范化 Calypso API 返回结构

@@ -154,7 +154,13 @@ class CalypsoClient:
             endpoint = f"/backend/v1/projects/{project_id}/scans"
         else:
             endpoint = "/backend/v1/scans"
-        return await self._request("POST", endpoint, json=payload)
+        try:
+            return await self._request("POST", endpoint, json=payload)
+        except CalypsoAPIError as exc:
+            if exc.status_code == 404 and project_id:
+                # 兼容部分 Calypso 部署版本中全局扫描路径 /backend/v1/scans
+                return await self._request("POST", "/backend/v1/scans", json={"prompt": prompt, "project_id": project_id})
+            raise exc
 
     async def get_prompts(
         self,
