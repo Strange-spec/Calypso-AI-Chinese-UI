@@ -1,0 +1,25 @@
+services:
+  calypso-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: calypso-web-ui:latest
+    container_name: calypso-ui
+    ports:
+      - "8080:8080"
+    environment:
+      - APP_MODE=${APP_MODE:-demo}
+      - CALYPSO_BASE_URL=${CALYPSO_BASE_URL:-https://us1.calypsoai.app}
+      - CALYPSO_API_TOKEN=${CALYPSO_API_TOKEN:-}
+      - DEFAULT_PROJECT_ID=${DEFAULT_PROJECT_ID:-}
+      - PORT=8080
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/system/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
