@@ -112,24 +112,19 @@ class CalypsoClient:
     async def test_connection(self) -> Dict[str, Any]:
         """测试与 Calypso API 服务的连通性。"""
         try:
-            return await self._request("GET", "/health")
+            return await self._request("GET", "/backend/v1/projects")
         except CalypsoAPIError as exc:
-            # 部分私有化部署环境下 /health 可能不存在或受鉴权保护，尝试调用项目列表端点
+            # 部分私有化部署环境尝试探测 /backend/v1/env
             if exc.status_code in (401, 403, 404):
                 try:
-                    projects = await self.list_projects()
-                    return {
-                        "status": "connected",
-                        "message": "服务连通性验证成功",
-                        "projects_count": len(projects) if isinstance(projects, list) else 0,
-                    }
+                    return await self._request("GET", "/backend/v1/env")
                 except Exception:
                     raise exc
             raise exc
 
     async def list_projects(self) -> List[Dict[str, Any]]:
         """获取所有项目列表。"""
-        res = await self._request("GET", "/api/v1/projects")
+        res = await self._request("GET", "/backend/v1/projects")
         if isinstance(res, list):
             return res
         if isinstance(res, dict):
@@ -141,7 +136,7 @@ class CalypsoClient:
 
     async def list_scanners(self, project_id: str) -> List[Dict[str, Any]]:
         """获取指定项目关联的安全扫描器配置列表。"""
-        res = await self._request("GET", f"/api/v1/projects/{project_id}/scanners")
+        res = await self._request("GET", f"/backend/v1/projects/{project_id}/scanners")
         if isinstance(res, list):
             return res
         if isinstance(res, dict):
@@ -156,9 +151,9 @@ class CalypsoClient:
         payload: Dict[str, Any] = {"prompt": prompt}
         if project_id:
             payload["project_id"] = project_id
-            endpoint = f"/api/v1/projects/{project_id}/scan"
+            endpoint = f"/backend/v1/projects/{project_id}/scans"
         else:
-            endpoint = "/api/v1/scan"
+            endpoint = "/backend/v1/scans"
         return await self._request("POST", endpoint, json=payload)
 
     async def get_prompts(
@@ -179,15 +174,15 @@ class CalypsoClient:
             params["after"] = after
         if before:
             params["before"] = before
-        return await self._request("GET", "/api/v1/prompts", params=params)
+        return await self._request("GET", "/backend/v1/prompts", params=params)
 
     async def list_campaigns(self) -> Dict[str, Any]:
         """获取红队测试活动（Campaigns）列表。"""
-        return await self._request("GET", "/api/v1/campaigns")
+        return await self._request("GET", "/backend/v1/campaigns")
 
     async def list_campaign_runs(self) -> Dict[str, Any]:
         """获取红队测试任务执行记录（Campaign Runs）列表。"""
-        return await self._request("GET", "/api/v1/campaign-runs")
+        return await self._request("GET", "/backend/v1/campaign-runs")
 
     async def close(self) -> None:
         """关闭底层 HTTP 连接池。"""

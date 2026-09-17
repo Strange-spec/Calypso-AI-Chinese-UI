@@ -210,14 +210,13 @@ async def test_calypso_client_invalid_connection():
 async def test_calypso_client_mock_transport_success():
     """验证 CalypsoClient 在正常 HTTP 响应下的接口封装。"""
     mock_routes = {
-        "/health": {"status": "ok", "version": "4.2.0"},
-        "/api/v1/projects": [{"id": "proj-1", "name": "Default Project"}],
-        "/api/v1/projects/proj-1/scanners": [{"name": "pii_scanner", "enabled": True}],
-        "/api/v1/scan": {"outcome": "cleared", "scanners": []},
-        "/api/v1/projects/proj-1/scan": {"outcome": "blocked", "scanners": ["prompt_injection"]},
-        "/api/v1/prompts": {"total": 1, "items": [{"id": "p1"}]},
-        "/api/v1/campaigns": {"campaigns": [{"id": "c1"}]},
-        "/api/v1/campaign-runs": {"runs": [{"id": "r1"}]},
+        "/backend/v1/projects": [{"id": "proj-1", "name": "Default Project"}],
+        "/backend/v1/projects/proj-1/scanners": [{"name": "pii_scanner", "enabled": True}],
+        "/backend/v1/scans": {"outcome": "cleared", "scanners": []},
+        "/backend/v1/projects/proj-1/scans": {"outcome": "blocked", "scanners": ["prompt_injection"]},
+        "/backend/v1/prompts": {"total": 1, "items": [{"id": "p1"}]},
+        "/backend/v1/campaigns": {"campaigns": [{"id": "c1"}]},
+        "/backend/v1/campaign-runs": {"runs": [{"id": "r1"}]},
     }
 
     def custom_handler(request: httpx.Request) -> httpx.Response:
@@ -239,9 +238,10 @@ async def test_calypso_client_mock_transport_success():
     )
 
     async with client:
-        # test_connection
+        # test_connection (probes /backend/v1/projects)
         conn = await client.test_connection()
-        assert conn["status"] == "ok"
+        assert isinstance(conn, list)
+        assert conn[0]["id"] == "proj-1"
 
         # list_projects
         projects = await client.list_projects()
@@ -276,9 +276,9 @@ async def test_calypso_client_mock_transport_success():
 async def test_calypso_client_http_errors():
     """验证 CalypsoClient 对 HTTP 状态码异常的优雅转换。"""
     def error_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/v1/projects":
+        if request.url.path == "/backend/v1/projects":
             return httpx.Response(401, json={"detail": "Unauthorized token"})
-        if request.url.path == "/api/v1/scan":
+        if request.url.path == "/backend/v1/scans":
             return httpx.Response(500, text="Internal Server Error")
         return httpx.Response(404, text="Not Found")
 
