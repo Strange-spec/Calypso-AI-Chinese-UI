@@ -171,7 +171,9 @@ class CalypsoClient:
         limit: int = 100,
     ) -> Dict[str, Any]:
         """查询历史提示词扫描审计记录。"""
-        params: Dict[str, Any] = {"limit": limit}
+        # Calypso upstream API 严格限制单次查询 limit <= 100
+        safe_limit = min(max(1, limit), 100) if limit else 100
+        params: Dict[str, Any] = {"limit": safe_limit}
         if project_id:
             params["project_id"] = project_id
         if outcomes:

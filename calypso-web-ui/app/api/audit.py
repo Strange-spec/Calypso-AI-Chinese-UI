@@ -87,7 +87,7 @@ async def get_audit_logs(
         res = await client.get_prompts(
             project_id=project_id or settings.default_project_id,
             outcomes=outcomes_list,
-            limit=page_size * page,
+            limit=min(page_size * page, 100),
         )
         items = []
         if isinstance(res, list):
