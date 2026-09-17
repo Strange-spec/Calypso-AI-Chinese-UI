@@ -21,16 +21,17 @@ app.add_middleware(
 )
 
 
-@app.get("/api/v1/system/status")
-async def get_system_status():
-    return {
-        "status": "ok",
-        "app_name": settings.app_name,
-        "version": settings.version,
-        "mode": settings.app_mode,
-        "base_url": settings.calypso_base_url,
-        "has_token": bool(settings.calypso_api_token),
-    }
+from app.api.system import router as system_router
+from app.api.guardrails import router as guardrails_router
+from app.api.dashboard import router as dashboard_router
+from app.api.redteam import router as redteam_router
+from app.api.audit import router as audit_router
+
+app.include_router(system_router, prefix="/api/v1")
+app.include_router(guardrails_router, prefix="/api/v1")
+app.include_router(dashboard_router, prefix="/api/v1")
+app.include_router(redteam_router, prefix="/api/v1")
+app.include_router(audit_router, prefix="/api/v1")
 
 
 # 若存在前端打包静态目录，则挂载静态服务
