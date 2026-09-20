@@ -9,6 +9,7 @@
             placeholder="所属项目筛选"
             clearable
             style="width: 260px"
+            @visible-change="(val) => { if (val) projectsStore.fetchProjects() }"
           >
             <el-option label="全部项目" value="" />
             <el-option
@@ -184,8 +185,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { getGuardrailsLogs } from '../../api/guardrails'
-import { getProjects } from '../../api/projects'
 import { useConfigStore } from '../../stores/config'
+import { useProjectsStore } from '../../stores/projects'
 
 const props = defineProps({
   filterProjectId: {
@@ -195,19 +196,20 @@ const props = defineProps({
 })
 
 const configStore = useConfigStore()
+const projectsStore = useProjectsStore()
+
 const loading = ref(false)
 const logs = ref([])
-const projects = ref([])
+const projects = computed(() => projectsStore.projects)
 const selectedProjectId = ref(props.filterProjectId || '')
 const selectedOutcome = ref('')
 
 const drawerVisible = ref(false)
 const selectedRow = ref(null)
 
-const fetchProjects = async () => {
+const fetchProjects = async (force = false) => {
   try {
-    const res = await getProjects()
-    projects.value = res.projects || []
+    await projectsStore.fetchProjects(force)
   } catch (e) {
     console.error(e)
   }
@@ -216,6 +218,8 @@ const fetchProjects = async () => {
 const fetchLogs = async () => {
   loading.value = true
   try {
+    // 刷新日志时同步拉取最新的项目列表
+    fetchProjects()
     const params = { limit: 50 }
     if (selectedProjectId.value) params.project_id = selectedProjectId.value
     if (selectedOutcome.value) params.outcomes = selectedOutcome.value
@@ -237,15 +241,18 @@ watch(
 
 watch(
   () => props.filterProjectId,
-  (newVal) => {
+  async (newVal) => {
     selectedProjectId.value = newVal || ''
+    if (newVal && !projects.value.some((p) => p.id === newVal)) {
+      await projectsStore.fetchProjects(true)
+    }
   }
 )
 
 watch(
   () => configStore.mode,
   async () => {
-    await fetchProjects()
+    await fetchProjects(true)
     await fetchLogs()
   }
 )

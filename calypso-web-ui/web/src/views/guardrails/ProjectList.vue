@@ -213,13 +213,15 @@
 import { ref, computed, onMounted } from 'vue'
 import { getProjects, createProject, updateProject, deleteProject } from '../../api/projects'
 import { getRules } from '../../api/guardrails'
+import { useProjectsStore } from '../../stores/projects'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const emit = defineEmits(['select-project'])
+const projectsStore = useProjectsStore()
 
 const loading = ref(false)
 const submitting = ref(false)
-const projectsList = ref([])
+const projectsList = computed(() => projectsStore.projects)
 const availableRules = ref([])
 const searchQuery = ref('')
 
@@ -242,8 +244,7 @@ const formRules = {
 const fetchData = async () => {
   loading.value = true
   try {
-    const [projRes, ruleRes] = await Promise.all([getProjects(), getRules()])
-    projectsList.value = projRes.projects || []
+    const [_, ruleRes] = await Promise.all([projectsStore.fetchProjects(true), getRules()])
     availableRules.value = ruleRes.rules || []
   } catch (err) {
     console.error('获取项目与规则失败', err)

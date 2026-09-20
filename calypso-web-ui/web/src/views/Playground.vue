@@ -13,7 +13,8 @@
             placeholder="请选择需要测试的安全护栏项目"
             style="width: 320px"
             @change="handleProjectChange"
-            v-loading="loadingProjects"
+            @visible-change="handleSelectDropdownVisible"
+            :loading="loadingProjects"
           >
             <el-option
               v-for="proj in projectsList"
@@ -29,6 +30,15 @@
               </div>
             </el-option>
           </el-select>
+
+          <!-- 刷新项目列表按钮 -->
+          <el-button
+            icon="Refresh"
+            circle
+            title="刷新项目列表"
+            :loading="loadingProjects"
+            @click="handleManualRefreshProjects"
+          />
 
           <!-- 应用项目参数按钮 -->
           <el-button
@@ -484,8 +494,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import apiClient from '../api/client'
-import { getProjects } from '../api/projects'
 import { useConfigStore } from '../stores/config'
+import { useProjectsStore } from '../stores/projects'
 import DiffViewer from '../components/DiffViewer.vue'
 
 const props = defineProps({
@@ -496,11 +506,12 @@ const props = defineProps({
 })
 
 const configStore = useConfigStore()
+const projectsStore = useProjectsStore()
 
-const projectsList = ref([])
+const projectsList = computed(() => projectsStore.projects)
 const activeProjectId = ref(props.initialProjectId || '')
 const boundProjectId = ref(props.initialProjectId || '')
-const loadingProjects = ref(false)
+const loadingProjects = computed(() => projectsStore.loading)
 
 const presets = ref([])
 const selectedPresetId = ref('')
@@ -521,7 +532,7 @@ const quickTags = [
 
 const currentProject = computed(() => {
   const targetId = boundProjectId.value || activeProjectId.value
-  return projectsList.value.find((p) => p.id === targetId) || null
+  return projectsStore.findProjectById(targetId) || null
 })
 
 const currentProjectScanners = computed(() => {
@@ -548,11 +559,9 @@ function applyProjectToPlayground() {
 }
 
 // 获取项目列表
-async function fetchProjects() {
-  loadingProjects.value = true
+async function fetchProjects(force = false) {
   try {
-    const res = await getProjects()
-    projectsList.value = res.projects || []
+    await projectsStore.fetchProjects(force)
     const targetId = route.query.project_id || props.initialProjectId
     if (targetId && projectsList.value.some(p => p.id === targetId)) {
       activeProjectId.value = targetId
@@ -563,16 +572,30 @@ async function fetchProjects() {
     }
   } catch (err) {
     console.error('获取项目空间失败', err)
-  } finally {
-    loadingProjects.value = false
+  }
+}
+
+async function handleManualRefreshProjects() {
+  await fetchProjects(true)
+  ElMessage.success('已刷新业务项目列表')
+}
+
+function handleSelectDropdownVisible(visible) {
+  if (visible) {
+    projectsStore.fetchProjects()
   }
 }
 
 watch(
   () => [route.query.project_id, props.initialProjectId],
-  ([queryId, propId]) => {
+  async ([queryId, propId]) => {
     const target = queryId || propId
-    if (target && projectsList.value.some((p) => p.id === target)) {
+    if (!target) return
+    // 如果在当前项目列表中未找到目标，强制重新拉取一次最新项目列表
+    if (!projectsList.value.some((p) => p.id === target)) {
+      await projectsStore.fetchProjects(true)
+    }
+    if (projectsList.value.some((p) => p.id === target)) {
       activeProjectId.value = target
       boundProjectId.value = target
     }

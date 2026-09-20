@@ -16,6 +16,7 @@
           filterable
           style="width: 260px"
           @change="handleProjectChange"
+          @visible-change="(val) => { if (val) projectsStore.fetchProjects() }"
         >
           <el-option label="全部业务项目 (All Projects)" value="all" />
           <el-option
@@ -163,10 +164,12 @@ import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import apiClient from '../api/client'
 import MetricCard from '../components/MetricCard.vue'
+import { useProjectsStore } from '../stores/projects'
 
+const projectsStore = useProjectsStore()
 const selectedTimeframe = ref('24h')
 const selectedProjectId = ref('all')
-const projectsList = ref([])
+const projectsList = computed(() => projectsStore.projects)
 const loading = ref(false)
 
 // 指标概览数据
@@ -217,10 +220,9 @@ function handleProjectChange() {
 }
 
 // 拉取可选项目列表
-async function fetchProjects() {
+async function fetchProjects(force = false) {
   try {
-    const res = await apiClient.get('/projects')
-    projectsList.value = Array.isArray(res) ? res : (res?.projects || res?.data || [])
+    await projectsStore.fetchProjects(force)
   } catch (err) {
     console.error('获取项目列表失败:', err)
   }

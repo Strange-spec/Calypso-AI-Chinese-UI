@@ -29,6 +29,7 @@
             clearable
             style="width: 220px"
             @change="handleFilterChange"
+            @visible-change="(val) => { if (val) projectsStore.fetchProjects() }"
           >
             <el-option label="全部业务项目" value="" />
             <el-option
@@ -239,10 +240,11 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import apiClient from '../api/client'
-import { getProjects } from '../api/projects'
 import { useConfigStore } from '../stores/config'
+import { useProjectsStore } from '../stores/projects'
 
 const configStore = useConfigStore()
+const projectsStore = useProjectsStore()
 const loading = ref(false)
 const logs = ref([])
 const total = ref(0)
@@ -251,15 +253,14 @@ const pageSize = ref(20)
 const filterOutcome = ref('')
 const selectedProjectId = ref('')
 const searchKeyword = ref('')
-const projectsList = ref([])
+const projectsList = computed(() => projectsStore.projects)
 
 const drawerVisible = ref(false)
 const selectedLog = ref(null)
 
-async function fetchProjects() {
+async function fetchProjects(force = false) {
   try {
-    const res = await getProjects()
-    projectsList.value = res.projects || []
+    await projectsStore.fetchProjects(force)
   } catch (err) {
     console.error('获取项目列表失败:', err)
   }

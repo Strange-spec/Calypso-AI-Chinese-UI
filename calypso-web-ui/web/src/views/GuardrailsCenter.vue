@@ -61,6 +61,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useProjectsStore } from '../stores/projects'
 import Playground from './Playground.vue'
 import ProjectList from './guardrails/ProjectList.vue'
 import RuleLibrary from './guardrails/RuleLibrary.vue'
@@ -68,12 +69,16 @@ import GuardrailsLogs from './guardrails/GuardrailsLogs.vue'
 
 const route = useRoute()
 const router = useRouter()
+const projectsStore = useProjectsStore()
 
 const activeTab = ref(route.query.tab || 'playground')
 const targetProjectId = ref(route.query.project_id || '')
 
-const handleTabChange = (tabName) => {
+const handleTabChange = async (tabName) => {
   router.replace({ query: { ...route.query, tab: tabName } })
+  if (['playground', 'projects', 'logs'].includes(tabName)) {
+    await projectsStore.fetchProjects()
+  }
 }
 
 const onSelectProjectForTesting = (project) => {
@@ -100,13 +105,14 @@ watch(
   }
 )
 
-onMounted(() => {
+onMounted(async () => {
   if (route.query.tab) {
     activeTab.value = route.query.tab
   }
   if (route.query.project_id) {
     targetProjectId.value = route.query.project_id
   }
+  await projectsStore.fetchProjects()
 })
 </script>
 
